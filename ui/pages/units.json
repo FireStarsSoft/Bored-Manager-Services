@@ -1,0 +1,201 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "title": "Services across every machine",
+      "blocks": [
+        {
+          "type": "table",
+          "source": { "kind": "invoke", "method": "unitRows", "intervalKey": "service-fleet" },
+          "rowKey": "id",
+          "columns": [
+            { "key": "unit", "label": "Service" },
+            { "key": "ip", "label": "Machine" },
+            { "key": "health", "label": "State" },
+            { "key": "watched", "label": "Watched" },
+            { "key": "severity", "label": "Severity" },
+            { "key": "fileState", "label": "At boot" },
+            { "key": "label", "label": "Rule" },
+            { "key": "description", "label": "Description" }
+          ],
+          "sortDefault": { "key": "unit", "dir": "asc" },
+          "filterKeys": ["unit", "ip", "health", "label", "description"],
+          "groupModes": [
+            { "id": "unit", "label": "By service", "key": "unit" },
+            { "id": "host", "label": "By machine", "key": "ip" },
+            { "id": "state", "label": "By state", "key": "health" }
+          ],
+          "selectable": true,
+          "bulkActions": [
+            {
+              "label": "Start",
+              "method": "bulkUnitAction",
+              "args": ["start"],
+              "confirm": "Start every selected service on its machine?"
+            },
+            {
+              "label": "Restart",
+              "method": "bulkUnitAction",
+              "args": ["restart"],
+              "confirm": "Restart every selected service on its machine?"
+            },
+            {
+              "label": "Stop",
+              "method": "bulkUnitAction",
+              "args": ["stop"],
+              "confirm": "Stop every selected service? They stay down until something starts them, and anything depending on them stops too.",
+              "kind": "danger"
+            },
+            {
+              "label": "Enable",
+              "method": "bulkUnitAction",
+              "args": ["enable"],
+              "confirm": "Start every selected service now and at every boot?"
+            },
+            {
+              "label": "Disable",
+              "method": "bulkUnitAction",
+              "args": ["disable"],
+              "confirm": "Stop every selected service and keep it from starting at boot?",
+              "kind": "danger"
+            }
+          ],
+          "rowActions": [
+            {
+              "label": "Restart",
+              "method": "unitAction",
+              "argsFromRow": ["ip", "unit"],
+              "args": ["restart"],
+              "confirm": "Restart this service on this machine?"
+            },
+            {
+              "label": "Start",
+              "method": "unitAction",
+              "argsFromRow": ["ip", "unit"],
+              "args": ["start"]
+            },
+            {
+              "label": "Stop",
+              "method": "unitAction",
+              "argsFromRow": ["ip", "unit"],
+              "args": ["stop"],
+              "confirm": "Stop this service on this machine?",
+              "kind": "danger"
+            }
+          ],
+          "rowDetail": [
+            {
+              "type": "keyValue",
+              "source": { "kind": "invoke", "method": "unitInspect", "args": ["$row.id"] },
+              "rows": [
+                { "key": "ip", "label": "Machine" },
+                { "key": "Id", "label": "Unit" },
+                { "key": "Description", "label": "Description" },
+                { "key": "LoadState", "label": "Load state" },
+                { "key": "ActiveState", "label": "Active state" },
+                { "key": "SubState", "label": "Sub state" },
+                { "key": "UnitFileState", "label": "At boot" },
+                { "key": "MainPID", "label": "Main PID", "format": "number" },
+                { "key": "NRestarts", "label": "Restarts", "format": "number" },
+                { "key": "Restart", "label": "Restart policy" },
+                { "key": "MemoryCurrent", "label": "Memory", "format": "bytes" },
+                { "key": "ActiveEnterTimestamp", "label": "Active since" },
+                { "key": "FragmentPath", "label": "Unit file" },
+                { "key": "error", "label": "Problem" }
+              ]
+            },
+            {
+              "type": "actions",
+              "actions": [
+                {
+                  "label": "Restart",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["restart"],
+                  "confirm": "Restart this service on this machine?"
+                },
+                {
+                  "label": "Reload",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["reload"]
+                },
+                {
+                  "label": "Unmask",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["unmask"]
+                },
+                {
+                  "label": "Mask",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["mask"],
+                  "confirm": "Mask this service? It cannot even be started by hand until it is unmasked.",
+                  "kind": "danger"
+                }
+              ]
+            },
+            {
+              "type": "log",
+              "event": "log",
+              "startMethod": "logsStart",
+              "stopMethod": "logsStop",
+              "argsFromScope": ["id"]
+            }
+          ],
+          "emptyText": "Nothing has been read yet. Sweep from the Machines page, or add a watched service under Module settings."
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Act on many at once",
+      "blocks": [
+        {
+          "type": "checkForm",
+          "title": "Bulk action by description",
+          "checkMethod": "bulkActionCheck",
+          "applyMethod": "bulkActionApply",
+          "applyLabel": "Run it",
+          "kind": "danger",
+          "fields": [
+            {
+              "key": "action",
+              "label": "Action",
+              "input": "select",
+              "optionsFrom": { "kind": "invoke", "method": "selectOptions", "args": ["actions"] },
+              "help": "What to do with every service that matches below."
+            },
+            {
+              "key": "hosts",
+              "label": "Machines",
+              "input": "text",
+              "placeholder": "10.0.0.*, lab-west",
+              "help": "Globs over the address or the rule label, comma separated. Empty means every machine in the roster."
+            },
+            {
+              "key": "units",
+              "label": "Services",
+              "input": "text",
+              "placeholder": "docker.service",
+              "help": "Globs over the unit name. Empty means every service the sweep found."
+            },
+            {
+              "key": "onlyWatched",
+              "label": "Only services on the watched list",
+              "input": "checkbox",
+              "initial": true
+            },
+            {
+              "key": "state",
+              "label": "Only when the service is",
+              "input": "select",
+              "optionsFrom": { "kind": "invoke", "method": "selectOptions", "args": ["states"] }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

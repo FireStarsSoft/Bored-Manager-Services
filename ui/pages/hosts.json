@@ -1,0 +1,151 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "title": "Sweep",
+      "slowTarget": "service-fleet",
+      "columns": 2,
+      "blocks": [
+        {
+          "type": "keyValue",
+          "source": { "kind": "stream", "event": "sweep" },
+          "rows": [
+            { "key": "state", "label": "State" },
+            { "key": "message", "label": "Last result" },
+            { "key": "done", "label": "Addresses answered", "format": "number" },
+            { "key": "total", "label": "Addresses asked", "format": "number" }
+          ]
+        },
+        {
+          "type": "actions",
+          "actions": [
+            { "label": "Sweep now", "method": "sweepNow" },
+            { "label": "Cancel sweep", "method": "sweepCancel" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Machines",
+      "blocks": [
+        {
+          "type": "table",
+          "source": { "kind": "invoke", "method": "hostRows", "intervalKey": "service-fleet" },
+          "rowKey": "ip",
+          "columns": [
+            { "key": "ip", "label": "Address" },
+            { "key": "status", "label": "Status" },
+            { "key": "hostname", "label": "Hostname" },
+            { "key": "os", "label": "System" },
+            { "key": "watched", "label": "Watched ok" },
+            { "key": "running", "label": "Running", "format": "number", "align": "right" },
+            { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
+            { "key": "label", "label": "Rule" },
+            { "key": "pinned", "label": "Named" },
+            { "key": "lastSeen", "label": "Last reached", "format": "duration", "align": "right" }
+          ],
+          "sortDefault": { "key": "ip", "dir": "asc" },
+          "filterKeys": ["ip", "hostname", "os", "label", "status", "note"],
+          "groupModes": [
+            { "id": "status", "label": "By status", "key": "status" },
+            { "id": "rule", "label": "By address rule", "key": "label" }
+          ],
+          "selectable": true,
+          "bulkActions": [
+            {
+              "label": "Forget",
+              "method": "hostForget",
+              "confirm": "Drop these machines from the roster? They come back on the next sweep if they answer.",
+              "kind": "danger"
+            }
+          ],
+          "rowActions": [
+            { "label": "Probe", "method": "hostProbe", "argsFromRow": ["ip"] },
+            {
+              "label": "Reboot",
+              "method": "hostAction",
+              "argsFromRow": ["ip"],
+              "args": ["reboot"],
+              "confirm": "Reboot this machine now? Everything running on it stops.",
+              "kind": "danger"
+            },
+            {
+              "label": "Forget",
+              "method": "hostForget",
+              "argsFromRow": ["ip"],
+              "confirm": "Drop this machine from the roster?",
+              "kind": "danger"
+            }
+          ],
+          "rowDetail": [
+            {
+              "type": "keyValue",
+              "source": { "kind": "invoke", "method": "hostInspect", "args": ["$row.ip"] },
+              "rows": [
+                { "key": "ip", "label": "Address" },
+                { "key": "label", "label": "Rule" },
+                { "key": "hostname", "label": "Hostname" },
+                { "key": "os", "label": "System" },
+                { "key": "kernel", "label": "Kernel" },
+                { "key": "status", "label": "Status" },
+                { "key": "reach", "label": "Reachability" },
+                { "key": "note", "label": "Notes" },
+                { "key": "username", "label": "Logs in as" },
+                { "key": "port", "label": "SSH port", "format": "number" },
+                { "key": "auth", "label": "Authentication" },
+                { "key": "sudo", "label": "Sudo" },
+                { "key": "controllable", "label": "Can be controlled" },
+                { "key": "packageManager", "label": "Package manager" },
+                { "key": "firstSeen", "label": "First seen", "format": "duration" },
+                { "key": "lastSeen", "label": "Last reached", "format": "duration" },
+                { "key": "lastProbeAt", "label": "Last asked", "format": "duration" }
+              ]
+            },
+            {
+              "type": "table",
+              "source": {
+                "kind": "invoke",
+                "method": "hostUnits",
+                "args": ["$row.ip"],
+                "intervalKey": "service-fleet"
+              },
+              "rowKey": "id",
+              "columns": [
+                { "key": "unit", "label": "Service" },
+                { "key": "health", "label": "State" },
+                { "key": "watched", "label": "Watched" },
+                { "key": "fileState", "label": "At boot" },
+                { "key": "description", "label": "Description" }
+              ],
+              "sortDefault": { "key": "unit", "dir": "asc" },
+              "emptyText": "Nothing was read from this machine",
+              "rowActions": [
+                {
+                  "label": "Restart",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["restart"],
+                  "confirm": "Restart this service on this machine?"
+                },
+                {
+                  "label": "Enable",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["enable"],
+                  "confirm": "Start this service now and at every boot?"
+                }
+              ]
+            },
+            {
+              "type": "terminal",
+              "label": "SSH shell",
+              "commandTemplate": "ssh -p {{port}} {{username}}@{{ip}}"
+            }
+          ],
+          "emptyText": "No machine has answered yet. Addresses inside a subnet only get a row once they reply, so nothing here means nothing replied."
+        }
+      ]
+    }
+  ]
+}

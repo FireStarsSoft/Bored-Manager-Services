@@ -1,0 +1,156 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": { "kind": "stream", "event": "capabilities", "path": "problem" },
+        "op": "exists"
+      },
+      "blocks": [
+        {
+          "type": "section",
+          "title": "This module cannot reach anything from here",
+          "blocks": [
+            {
+              "type": "keyValue",
+              "source": { "kind": "stream", "event": "capabilities" },
+              "rows": [
+                { "key": "problem", "label": "Problem" },
+                { "key": "sshVersion", "label": "SSH client" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Fleet",
+      "columns": 4,
+      "slowTarget": "service-fleet",
+      "blocks": [
+        {
+          "type": "stat",
+          "label": "Machines up",
+          "source": { "kind": "stream", "event": "hosts", "path": "counts.online" },
+          "format": "number",
+          "spark": { "source": { "kind": "stream", "event": "series" }, "key": "online" }
+        },
+        {
+          "type": "stat",
+          "label": "Unreachable",
+          "source": { "kind": "stream", "event": "hosts", "path": "counts.offline" },
+          "format": "number",
+          "spark": { "source": { "kind": "stream", "event": "series" }, "key": "offline" }
+        },
+        {
+          "type": "stat",
+          "label": "Needs attention",
+          "source": { "kind": "stream", "event": "hosts", "path": "counts.degraded" },
+          "format": "number",
+          "spark": { "source": { "kind": "stream", "event": "series" }, "key": "degraded" }
+        },
+        {
+          "type": "stat",
+          "label": "Failed services",
+          "source": { "kind": "stream", "event": "hosts", "path": "counts.unitsFailed" },
+          "format": "number",
+          "spark": { "source": { "kind": "stream", "event": "series" }, "key": "failed" }
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Status wall",
+      "blocks": [
+        {
+          "type": "statusCards",
+          "source": { "kind": "stream", "event": "hosts", "path": "hosts" },
+          "rowKey": "id",
+          "titleKey": "ip",
+          "statusKey": "status",
+          "subtitleKey": "summary",
+          "note": { "key": "note", "label": "Notes" },
+          "items": {
+            "key": "services",
+            "visibleRows": 2,
+            "pinnedFilterLabel": "Watched services only",
+            "emptyText": "No services reported"
+          },
+          "columns": { "default": 4, "min": 1, "max": 8 },
+          "rowActions": [
+            { "label": "Probe", "method": "hostProbe", "argsFromRow": ["ip"] }
+          ],
+          "rowDetail": [
+            {
+              "type": "keyValue",
+              "source": { "kind": "invoke", "method": "hostInspect", "args": ["$row.ip"] },
+              "rows": [
+                { "key": "ip", "label": "Address" },
+                { "key": "hostname", "label": "Hostname" },
+                { "key": "os", "label": "System" },
+                { "key": "kernel", "label": "Kernel" },
+                { "key": "status", "label": "Status" },
+                { "key": "note", "label": "Notes" },
+                { "key": "username", "label": "Logs in as" },
+                { "key": "controllable", "label": "Can be controlled" },
+                { "key": "packageManager", "label": "Package manager" },
+                { "key": "running", "label": "Services running", "format": "number" },
+                { "key": "failed", "label": "Services failed", "format": "number" },
+                { "key": "lastSeen", "label": "Last reached", "format": "duration" }
+              ]
+            },
+            {
+              "type": "table",
+              "source": {
+                "kind": "invoke",
+                "method": "hostUnits",
+                "args": ["$row.ip"],
+                "intervalKey": "service-fleet"
+              },
+              "rowKey": "id",
+              "columns": [
+                { "key": "unit", "label": "Service" },
+                { "key": "health", "label": "State" },
+                { "key": "watched", "label": "Watched" },
+                { "key": "fileState", "label": "At boot" }
+              ],
+              "sortDefault": { "key": "unit", "dir": "asc" },
+              "filterKeys": ["unit", "health", "description"],
+              "emptyText": "Nothing was read from this machine",
+              "rowActions": [
+                {
+                  "label": "Restart",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["restart"],
+                  "confirm": "Restart this service on this machine?"
+                },
+                {
+                  "label": "Start",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["start"]
+                },
+                {
+                  "label": "Stop",
+                  "method": "unitAction",
+                  "argsFromRow": ["ip", "unit"],
+                  "args": ["stop"],
+                  "confirm": "Stop this service on this machine? Anything depending on it stops too.",
+                  "kind": "danger"
+                }
+              ]
+            },
+            {
+              "type": "terminal",
+              "label": "SSH shell",
+              "commandTemplate": "ssh -p {{port}} {{username}}@{{ip}}"
+            }
+          ],
+          "emptyText": "No machines yet. Add an address or a subnet under Module settings, then sweep."
+        }
+      ]
+    }
+  ]
+}

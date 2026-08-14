@@ -1,0 +1,61 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "title": "Jobs",
+      "blocks": [
+        {
+          "type": "table",
+          "source": { "kind": "stream", "event": "jobs", "path": "jobs" },
+          "rowKey": "id",
+          "columns": [
+            { "key": "label", "label": "Job" },
+            { "key": "kind", "label": "Kind" },
+            { "key": "state", "label": "State" },
+            { "key": "progressPct", "label": "Progress", "format": "pct", "align": "right" },
+            { "key": "done", "label": "Done", "format": "number", "align": "right" },
+            { "key": "total", "label": "Machines", "format": "number", "align": "right" },
+            { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
+            { "key": "startedAt", "label": "Started", "format": "duration", "align": "right" }
+          ],
+          "sortDefault": { "key": "startedAt", "dir": "desc" },
+          "filterKeys": ["label", "kind", "state"],
+          "groupModes": [{ "id": "kind", "label": "By kind", "key": "kind" }],
+          "emptyText": "Nothing has been run yet",
+          "rowActions": [
+            {
+              "label": "Cancel",
+              "method": "jobCancel",
+              "argsFromRow": ["id"],
+              "confirm": "Stop this job? Machines already being contacted will finish.",
+              "kind": "danger"
+            }
+          ],
+          "rowDetail": [
+            {
+              "type": "list",
+              "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
+              "columns": [
+                { "key": "name", "label": "Machine" },
+                { "key": "status", "label": "Result" },
+                { "key": "message", "label": "Message" }
+              ],
+              "limit": 200,
+              "emptyText": "No machines in this job"
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "actions": [
+            {
+              "label": "Clear finished",
+              "method": "jobsClear",
+              "confirm": "Forget every finished job? Running ones are left alone."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

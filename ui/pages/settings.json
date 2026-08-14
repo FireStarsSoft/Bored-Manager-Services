@@ -1,0 +1,503 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "title": "What the connected machine can do",
+      "blocks": [
+        {
+          "type": "keyValue",
+          "source": { "kind": "stream", "event": "capabilities" },
+          "rows": [
+            { "key": "connected", "label": "Connected to a machine" },
+            { "key": "sshVersion", "label": "SSH client" },
+            { "key": "sshpass", "label": "sshpass (needed for password logins)" },
+            { "key": "xargs", "label": "xargs (needed to contact machines in parallel)" },
+            { "key": "base64", "label": "base64" },
+            { "key": "timeout", "label": "timeout" },
+            { "key": "mktemp", "label": "mktemp" },
+            { "key": "problem", "label": "Problem" }
+          ]
+        },
+        {
+          "type": "conditional",
+          "when": {
+            "source": { "kind": "stream", "event": "capabilities", "path": "problem" },
+            "op": "exists"
+          },
+          "blocks": [
+            {
+              "type": "actions",
+              "actions": [{ "label": "Look again", "method": "sweepNow" }]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Addresses to watch",
+      "blocks": [
+        {
+          "type": "table",
+          "source": { "kind": "invoke", "method": "targets", "intervalKey": "service-fleet" },
+          "rowKey": "id",
+          "columns": [
+            { "key": "value", "label": "Address" },
+            { "key": "kind", "label": "Kind" },
+            { "key": "label", "label": "Label" },
+            { "key": "enabled", "label": "On" },
+            { "key": "addresses", "label": "Addresses", "format": "number", "align": "right" },
+            { "key": "machines", "label": "Known", "format": "number", "align": "right" },
+            { "key": "username", "label": "User" },
+            { "key": "auth", "label": "Auth" },
+            { "key": "sudo", "label": "Sudo" },
+            { "key": "problem", "label": "Problem" },
+            { "key": "lastTest", "label": "Last test" }
+          ],
+          "sortDefault": { "key": "value", "dir": "asc" },
+          "emptyText": "Nothing is watched yet - add an address or a subnet below",
+          "rowActions": [
+            { "label": "Test", "method": "targetTest", "argsFromRow": ["id"] },
+            {
+              "label": "Delete",
+              "method": "targetDelete",
+              "argsFromRow": ["id"],
+              "confirm": "Delete this address rule? Machines only it reached are dropped from the roster.",
+              "kind": "danger"
+            }
+          ],
+          "rowDetail": [
+            {
+              "type": "checkForm",
+              "title": "Edit this address rule",
+              "checkMethod": "targetCheck",
+              "applyMethod": "targetApply",
+              "argsFromScope": ["id"],
+              "applyLabel": "Save it",
+              "fields": [
+                {
+                  "key": "kind",
+                  "label": "Kind",
+                  "input": "select",
+                  "initialFromScope": "kind",
+                  "options": [
+                    { "value": "host", "label": "One address" },
+                    { "value": "cidr", "label": "A CIDR block" },
+                    { "value": "range", "label": "A range" }
+                  ]
+                },
+                { "key": "value", "label": "Address", "input": "text", "initialFromScope": "value" },
+                { "key": "label", "label": "Label", "input": "text", "initialFromScope": "label" },
+                {
+                  "key": "enabled",
+                  "label": "Sweep this rule",
+                  "input": "checkbox",
+                  "initialFromScope": "enabledFlag",
+                  "initial": true
+                },
+                { "key": "port", "label": "SSH port", "input": "text", "initialFromScope": "port" },
+                { "key": "username", "label": "User name", "input": "text", "initialFromScope": "username" },
+                {
+                  "key": "auth",
+                  "label": "Authentication",
+                  "input": "select",
+                  "initialFromScope": "auth",
+                  "options": [
+                    { "value": "agent", "label": "Agent or default keys" },
+                    { "value": "key", "label": "A key file on the connected machine" },
+                    { "value": "password", "label": "A password" }
+                  ]
+                },
+                {
+                  "key": "keyPath",
+                  "label": "Key path on the connected machine",
+                  "input": "text",
+                  "initialFromScope": "keyPath",
+                  "help": "Read where this app is connected, not on this server."
+                },
+                {
+                  "key": "password",
+                  "label": "Password",
+                  "input": "password",
+                  "help": "Leave empty to keep the one already saved. Stored in clear text - an SSH key leaves nothing to store."
+                },
+                {
+                  "key": "sudo",
+                  "label": "Sudo",
+                  "input": "select",
+                  "initialFromScope": "sudo",
+                  "options": [
+                    { "value": "none", "label": "None - watch only" },
+                    { "value": "sudo-n", "label": "Passwordless sudo" },
+                    { "value": "sudo-password", "label": "Sudo with a password" }
+                  ]
+                },
+                {
+                  "key": "sudoPassword",
+                  "label": "Sudo password",
+                  "input": "password",
+                  "help": "Leave empty to keep the one already saved. Also stored in clear text."
+                },
+                {
+                  "key": "excludes",
+                  "label": "Addresses to skip",
+                  "input": "textarea",
+                  "initialFromScope": "excludes",
+                  "placeholder": "10.0.0.1\n10.0.0.254"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "checkForm",
+          "title": "Add an address, a subnet or a range",
+          "checkMethod": "targetCheck",
+          "applyMethod": "targetApply",
+          "applyLabel": "Add it",
+          "fields": [
+            {
+              "key": "kind",
+              "label": "Kind",
+              "input": "select",
+              "options": [
+                { "value": "host", "label": "One address" },
+                { "value": "cidr", "label": "A CIDR block" },
+                { "value": "range", "label": "A range" }
+              ],
+              "help": "One address always gets a card, even while it has never answered. Everything inside a block or a range earns its card by answering once."
+            },
+            {
+              "key": "value",
+              "label": "Address",
+              "input": "text",
+              "placeholder": "10.0.0.5, 10.0.0.0/24, or 10.0.0.10-40"
+            },
+            {
+              "key": "label",
+              "label": "Label",
+              "input": "text",
+              "placeholder": "lab-west",
+              "help": "Shown on the rows and usable in the machine filters."
+            },
+            { "key": "enabled", "label": "Sweep this rule", "input": "checkbox", "initial": true },
+            { "key": "port", "label": "SSH port", "input": "text", "initial": "22" },
+            { "key": "username", "label": "User name", "input": "text", "initial": "root" },
+            {
+              "key": "auth",
+              "label": "Authentication",
+              "input": "select",
+              "options": [
+                { "value": "agent", "label": "Agent or default keys" },
+                { "value": "key", "label": "A key file on the connected machine" },
+                { "value": "password", "label": "A password" }
+              ]
+            },
+            {
+              "key": "keyPath",
+              "label": "Key path on the connected machine",
+              "input": "text",
+              "placeholder": "/root/.ssh/id_ed25519",
+              "help": "Read where this app is connected, not on this server."
+            },
+            {
+              "key": "password",
+              "label": "Password",
+              "input": "password",
+              "help": "Stored in clear text in this module's own settings file, because a module has no way to encrypt it. An SSH key leaves nothing to store."
+            },
+            {
+              "key": "sudo",
+              "label": "Sudo",
+              "input": "select",
+              "options": [
+                { "value": "none", "label": "None - watch only" },
+                { "value": "sudo-n", "label": "Passwordless sudo" },
+                { "value": "sudo-password", "label": "Sudo with a password" }
+              ],
+              "help": "Nothing can be started or stopped on a machine whose account is not root and has no usable sudo."
+            },
+            {
+              "key": "sudoPassword",
+              "label": "Sudo password",
+              "input": "password",
+              "help": "Also stored in clear text."
+            },
+            {
+              "key": "excludes",
+              "label": "Addresses to skip",
+              "input": "textarea",
+              "placeholder": "10.0.0.1\n10.0.0.254",
+              "help": "Addresses inside the block that are not machines of yours - a router, a printer."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Watched services",
+      "blocks": [
+        {
+          "type": "table",
+          "source": { "kind": "invoke", "method": "watched", "intervalKey": "service-fleet" },
+          "rowKey": "id",
+          "columns": [
+            { "key": "unit", "label": "Service" },
+            { "key": "label", "label": "Label" },
+            { "key": "severity", "label": "Severity" },
+            { "key": "appliesTo", "label": "Applies to" },
+            { "key": "machines", "label": "Machines", "format": "number", "align": "right" },
+            { "key": "down", "label": "Not running", "format": "number", "align": "right" },
+            { "key": "packages", "label": "Package" },
+            { "key": "onInstall", "label": "After install" }
+          ],
+          "sortDefault": { "key": "unit", "dir": "asc" },
+          "emptyText": "Nothing is watched in particular yet, so every card shows whatever is running",
+          "rowActions": [
+            {
+              "label": "Delete",
+              "method": "watchedDelete",
+              "argsFromRow": ["id"],
+              "confirm": "Stop watching this service?",
+              "kind": "danger"
+            }
+          ],
+          "rowDetail": [
+            {
+              "type": "checkForm",
+              "title": "Edit this watched service",
+              "checkMethod": "watchedCheck",
+              "applyMethod": "watchedApply",
+              "argsFromScope": ["id"],
+              "applyLabel": "Save it",
+              "fields": [
+                { "key": "unit", "label": "Unit", "input": "text", "initialFromScope": "unit" },
+                { "key": "label", "label": "Label", "input": "text", "initialFromScope": "label" },
+                {
+                  "key": "severity",
+                  "label": "Severity",
+                  "input": "select",
+                  "initialFromScope": "severity",
+                  "options": [
+                    { "value": "normal", "label": "Normal - amber when it is down" },
+                    { "value": "critical", "label": "Critical - red when it is down" }
+                  ]
+                },
+                {
+                  "key": "appliesTo",
+                  "label": "Only on these machines",
+                  "input": "text",
+                  "initialFromScope": "appliesToRaw"
+                },
+                { "key": "packages", "label": "Package", "input": "text", "initialFromScope": "packages" },
+                {
+                  "key": "installCommand",
+                  "label": "Custom install command",
+                  "input": "textarea",
+                  "initialFromScope": "installCommand"
+                },
+                {
+                  "key": "enableOnInstall",
+                  "label": "Enable it at boot after installing",
+                  "input": "checkbox",
+                  "initialFromScope": "enableFlag",
+                  "initial": true
+                },
+                {
+                  "key": "startOnInstall",
+                  "label": "Start it after installing",
+                  "input": "checkbox",
+                  "initialFromScope": "startFlag",
+                  "initial": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "checkForm",
+          "title": "Watch a service on every machine",
+          "checkMethod": "watchedCheck",
+          "applyMethod": "watchedApply",
+          "applyLabel": "Watch it",
+          "fields": [
+            {
+              "key": "unit",
+              "label": "Unit",
+              "input": "text",
+              "placeholder": "docker",
+              "help": "A bare name becomes `<name>.service`. Watched services are shown first on every card and are what the health colour is about."
+            },
+            { "key": "label", "label": "Label", "input": "text", "placeholder": "Container runtime" },
+            {
+              "key": "severity",
+              "label": "Severity",
+              "input": "select",
+              "options": [
+                { "value": "normal", "label": "Normal - amber when it is down" },
+                { "value": "critical", "label": "Critical - red when it is down" }
+              ]
+            },
+            {
+              "key": "appliesTo",
+              "label": "Only on these machines",
+              "input": "text",
+              "placeholder": "10.0.0.*, lab-west",
+              "help": "Globs over the address or the rule label. Empty means every machine."
+            },
+            {
+              "key": "packages",
+              "label": "Package",
+              "input": "text",
+              "placeholder": "docker.io",
+              "help": "For bulk install. One name for every machine, or per manager: apt=docker.io,dnf=moby-engine."
+            },
+            {
+              "key": "installCommand",
+              "label": "Custom install command",
+              "input": "textarea",
+              "placeholder": "curl is not allowed here - use the machine's package manager",
+              "help": "Replaces the package manager entirely and runs as root. {{package}} and {{unit}} are filled in."
+            },
+            { "key": "enableOnInstall", "label": "Enable it at boot after installing", "input": "checkbox", "initial": true },
+            { "key": "startOnInstall", "label": "Start it after installing", "input": "checkbox", "initial": true }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Rules in force",
+      "blocks": [
+        {
+          "type": "keyValue",
+          "source": { "kind": "invoke", "method": "rulesEffective", "intervalKey": "service-fleet" },
+          "rows": [
+            { "key": "maxParallel", "label": "Machines contacted at once" },
+            { "key": "connectTimeoutSec", "label": "SSH connect timeout (s)" },
+            { "key": "perHostTimeoutSec", "label": "Per-machine timeout (s)" },
+            { "key": "sweepTimeoutSec", "label": "Whole sweep timeout (s)" },
+            { "key": "controlPersistSec", "label": "Keep SSH connections warm (s)" },
+            { "key": "strictHostKey", "label": "Strict host key checking" },
+            { "key": "maxHosts", "label": "Largest address range" },
+            { "key": "unitScope", "label": "Which services are listed" },
+            { "key": "maxUnitsPerHost", "label": "Unit lines per machine" },
+            { "key": "cardUnits", "label": "Chips per card" },
+            { "key": "bulkWarnAt", "label": "Warn on bulk action size" },
+            { "key": "installWarnAt", "label": "Warn on install size" },
+            { "key": "criticalDownIsRed", "label": "A critical service down turns the card red" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "title": "Change the rules",
+      "blocks": [
+        {
+          "type": "checkForm",
+          "checkMethod": "rulesCheck",
+          "applyMethod": "rulesApply",
+          "applyLabel": "Save the rules",
+          "fields": [
+            {
+              "key": "maxParallel",
+              "label": "Machines contacted at once",
+              "input": "text",
+              "help": "1 to 64. Empty uses the default of 16. This is how many SSH sessions the connected machine opens at the same time."
+            },
+            {
+              "key": "connectTimeoutSec",
+              "label": "SSH connect timeout (s)",
+              "input": "text",
+              "help": "1 to 30. Default 5. Every address that is not there costs this long."
+            },
+            {
+              "key": "perHostTimeoutSec",
+              "label": "Per-machine timeout (s)",
+              "input": "text",
+              "help": "5 to 300. Default 20. Cuts off a machine that answers and then hangs."
+            },
+            {
+              "key": "sweepTimeoutSec",
+              "label": "Whole sweep timeout (s)",
+              "input": "text",
+              "help": "30 to 900. Default 180. The connection is shared with the app's own collectors, so this cannot be unlimited."
+            },
+            {
+              "key": "controlPersistSec",
+              "label": "Keep SSH connections warm (s)",
+              "input": "text",
+              "help": "0 to 600. Default 60. Reusing connections is what makes a second sweep fast; 0 turns it off and makes following a log impossible on a password login."
+            },
+            {
+              "key": "maxHosts",
+              "label": "Largest address range",
+              "input": "text",
+              "help": "1 to 4096. Default 256. A rule covering more addresses than this is refused."
+            },
+            {
+              "key": "unitScope",
+              "label": "Which services are listed",
+              "input": "select",
+              "options": [
+                { "value": "running", "label": "Running and failed (default)" },
+                { "value": "watched", "label": "Only the watched ones" },
+                { "value": "all", "label": "Every unit, including inactive" }
+              ]
+            },
+            {
+              "key": "maxUnitsPerHost",
+              "label": "Unit lines per machine",
+              "input": "text",
+              "help": "10 to 500. Default 120. Caps how much one machine can return in a sweep."
+            },
+            {
+              "key": "cardUnits",
+              "label": "Chips per card",
+              "input": "text",
+              "help": "4 to 40. Default 12. The rest are still in the card's drawer."
+            },
+            {
+              "key": "bulkWarnAt",
+              "label": "Warn on bulk action size",
+              "input": "text",
+              "help": "1 to 1000. Default 25."
+            },
+            {
+              "key": "installWarnAt",
+              "label": "Warn on install size",
+              "input": "text",
+              "help": "1 to 1000. Default 10."
+            },
+            {
+              "key": "strictHostKey",
+              "label": "Check host keys",
+              "input": "checkbox",
+              "help": "Off suits a network you own. On means every machine must already be in the connected account's known_hosts. Saving this form applies the state shown here."
+            },
+            {
+              "key": "criticalDownIsRed",
+              "label": "A critical service down turns the card red",
+              "input": "checkbox",
+              "initial": true,
+              "help": "Off makes it amber like any other. Saving this form applies the state shown here."
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "actions": [
+            {
+              "label": "Reset every rule",
+              "method": "rulesReset",
+              "confirm": "Put every rule back to its default?",
+              "kind": "danger"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "apiVersion": 2,
+  "id": "service-fleet",
+  "name": "Services",
+  "version": "1.0.0",
+  "description": "Watch and control systemd services across every machine in an IP range from one page: a status wall per machine, bulk start/stop/restart with a check step, and bulk install of the units you decided every machine must have.",
+  "author": "Bored Manager",
+  "minAppVersion": "0.3.0",
+  "defaultEnabled": false,
+  "entries": {
+    "main": "main/index.ts"
+  },
+  "pages": [
+    { "id": "overview", "label": "Overview", "icon": "Gauge", "order": 33 },
+    { "id": "hosts", "label": "Machines", "icon": "Network", "order": 34 },
+    { "id": "units", "label": "Services", "icon": "ListTree", "order": 35 },
+    { "id": "rollout", "label": "Bulk install", "icon": "Layers", "order": 36 },
+    { "id": "jobs", "label": "Jobs", "icon": "Activity", "order": 37 },
+    { "id": "settings", "label": "Module settings", "icon": "Settings2", "order": 38 }
+  ],
+  "widgets": [
+    { "id": "summary", "label": "Service fleet", "defaultEnabled": true, "order": 8 },
+    { "id": "wall", "label": "Fleet status wall", "order": 75 }
+  ],
+  "streams": [
+    { "event": "hosts", "kind": "latest" },
+    { "event": "series", "kind": "series" },
+    { "event": "jobs", "kind": "latest" },
+    { "event": "sweep", "kind": "latest" },
+    { "event": "capabilities", "kind": "latest" }
+  ],
+  "methods": [
+    "hostRows",
+    "hostInspect",
+    "hostUnits",
+    "hostForget",
+    "hostProbe",
+    "hostAction",
+    "unitRows",
+    "unitInspect",
+    "unitAction",
+    "bulkUnitAction",
+    "bulkActionCheck",
+    "bulkActionApply",
+    "logsStart",
+    "logsStop",
+    "sweepNow",
+    "sweepCancel",
+    "targets",
+    "targetCheck",
+    "targetApply",
+    "targetDelete",
+    "targetTest",
+    "watched",
+    "watchedCheck",
+    "watchedApply",
+    "watchedDelete",
+    "installCheck",
+    "installApply",
+    "rulesEffective",
+    "rulesCheck",
+    "rulesApply",
+    "rulesReset",
+    "jobs",
+    "jobCancel",
+    "jobsClear",
+    "selectOptions",
+    "capabilities"
+  ],
+  "fastInterval": "service-fleet",
+  "slowInterval": "service-fleet"
+}
