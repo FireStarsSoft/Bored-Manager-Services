@@ -1,6 +1,10 @@
 # Changelog
 
-Module versions are independent of the app's. Needs Bored Manager **0.3.0** for the `statusCards` block.
+Module versions are independent of the app's. Needs Bored Manager **0.3.2** for the `pie` block.
+
+## 1.1.0
+
+- **Overview card is a donut.** The Service fleet widget shows machine counts as a donut: total in the centre, slices for Normal / Warning / Error / Unknown (the same colours as the status wall). Needs the app's `pie` block.
 
 ## 1.0.0
 

@@ -2,10 +2,10 @@
   "apiVersion": 2,
   "id": "service-fleet",
   "name": "Services",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Watch and control systemd services across every machine in an IP range from one page: a status wall per machine, bulk start/stop/restart with a check step, and bulk install of the units you decided every machine must have.",
   "author": "Bored Manager",
-  "minAppVersion": "0.3.0",
+  "minAppVersion": "0.3.2",
   "defaultEnabled": false,
   "entries": {
     "main": "main/index.ts"

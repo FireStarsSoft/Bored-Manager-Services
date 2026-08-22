@@ -7,7 +7,7 @@ Watch and control systemd services across every machine in an IP range, from the
 | Where | What |
 |---|---|
 | Sidebar → Services | **Overview** (a status wall, one card per machine), **Machines**, **Services** (every machine and unit in one table), **Bulk install**, **Jobs**, **Module settings** |
-| Overview cards | **Service fleet** (counts, on by default) and **Fleet status wall** (the same wall, compact) |
+| Overview cards | **Service fleet** (status donut, on by default) and **Fleet status wall** (the same wall, compact) |
 | History | `service-fleet`: machines up, unreachable, degraded, services running and failed |
 
 ## How it reaches other machines

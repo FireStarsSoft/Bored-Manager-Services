@@ -3,33 +3,20 @@
     {
       "type": "section",
       "title": "Service fleet",
-      "columns": 2,
       "blocks": [
         {
-          "type": "stat",
-          "label": "Machines up",
-          "source": { "kind": "stream", "event": "hosts", "path": "counts.online" },
-          "format": "number",
-          "spark": { "source": { "kind": "stream", "event": "series" }, "key": "online" }
-        },
-        {
-          "type": "stat",
-          "label": "Need attention",
-          "source": { "kind": "stream", "event": "hosts", "path": "counts.degraded" },
-          "format": "number",
-          "spark": { "source": { "kind": "stream", "event": "series" }, "key": "degraded" }
+          "type": "pie",
+          "source": { "kind": "stream", "event": "hosts", "path": "counts" },
+          "center": { "key": "total", "label": "Machines" },
+          "emptyText": "No machines watched yet",
+          "slices": [
+            { "key": "online", "label": "Normal", "status": "ok" },
+            { "key": "degraded", "label": "Warning", "status": "warn" },
+            { "key": "offline", "label": "Error", "status": "bad" },
+            { "key": "unknown", "label": "Unknown", "status": "unknown" }
+          ]
         }
       ]
-    },
-    {
-      "type": "list",
-      "source": { "kind": "stream", "event": "hosts", "path": "hosts" },
-      "columns": [
-        { "key": "ip" },
-        { "key": "summary", "align": "right" }
-      ],
-      "limit": 4,
-      "emptyText": "No machines watched yet"
     }
   ]
 }
