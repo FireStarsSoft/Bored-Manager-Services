@@ -4,6 +4,7 @@
       "type": "section",
       "title": "Sweep",
       "slowTarget": "service-fleet",
+      "slowAt": { "kind": "stream", "event": "sweep", "path": "t" },
       "columns": 2,
       "blocks": [
         {
@@ -46,7 +47,7 @@
             { "key": "lastSeen", "label": "Last reached", "format": "duration", "align": "right" }
           ],
           "sortDefault": { "key": "ip", "dir": "asc" },
-          "filterKeys": ["ip", "hostname", "os", "label", "status", "note"],
+          "filterKeys": ["ip", "hostname", "os", "label", "status"],
           "groupModes": [
             { "id": "status", "label": "By status", "key": "status" },
             { "id": "rule", "label": "By address rule", "key": "label" }

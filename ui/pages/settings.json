@@ -15,7 +15,8 @@
             { "key": "base64", "label": "base64" },
             { "key": "timeout", "label": "timeout" },
             { "key": "mktemp", "label": "mktemp" },
-            { "key": "problem", "label": "Problem" }
+            { "key": "problem", "label": "Problem" },
+            { "key": "warning", "label": "Warning" }
           ]
         },
         {

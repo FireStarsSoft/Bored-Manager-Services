@@ -14,9 +14,15 @@
  *    `sshpass -f`; a sudo password is a shell variable inside the script that
  *    is piped to the target, never a word on a command line. `ps` on either
  *    machine shows nothing but flags.
- * 2. **Everything has a timeout.** `timeout` around each ssh so one wedged
- *    machine cannot hold the batch, and `timeoutMs` on the exec itself because
- *    the connection is shared with the app's own collectors.
+ * 2. **Everything has a timeout, where the jump host allows it.** `timeout`
+ *    around each ssh so one wedged machine cannot hold the batch (falling back
+ *    to no per-host limit when the jump host has no `timeout` binary at all -
+ *    Module settings surfaces that as a warning), and `timeoutMs` on the exec
+ *    itself - which always applies, since it is enforced here rather than on
+ *    the jump host - because the connection is shared with the app's own
+ *    collectors. `runFanout`'s `signal` can also cut a batch short before
+ *    either limit is reached, when the user cancels or the module is switched
+ *    off mid-sweep.
  * 3. **Output is framed and bounded.** `xargs -P` interleaves, so each ssh
  *    writes to its own file and the frame is assembled afterwards in the order
  *    the hosts were asked. stderr is truncated: the executor puts no cap on how
@@ -65,20 +71,25 @@ const FRAME = { host: '===BMHOST===', rc: '===BMRC===', out: '===BMOUT===', err:
  *   H  ip  port  b64(user)  auth  b64(keyPath)  b64(password)  b64(payload or empty)
  *   Z
  */
-const FANOUT_SCRIPT = String.raw`
+/** Exported so a test can run it under a shell with a bare environment. */
+export const FANOUT_SCRIPT = String.raw`
 set -u
 umask 077
 d=$(mktemp -d /tmp/bm-fleet.XXXXXXXX) || exit 3
 trap 'rm -rf "$d"' EXIT INT TERM HUP
 # A hard kill (the exec timing out) cannot run the trap, so stale directories
 # from a previous run are swept here rather than left to accumulate.
-find /tmp -maxdepth 1 -name 'bm-fleet.*' -mmin +60 -exec rm -rf {} + 2>/dev/null
+find /tmp -maxdepth 1 -name 'bm-fleet.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
 # Control sockets have to outlive this command for ControlPersist to be worth
 # anything, so they live outside $d - per user, never in a shared location.
-# Written the long way round: brace expansion with a default would be read as a
-# template substitution on the way here rather than by the shell.
-cm=$XDG_RUNTIME_DIR
-[ -n "$cm" ] || cm=$HOME/.cache
+# Read with printenv rather than the variable itself. A brace expansion with a
+# default cannot be written here at all - this script is a template literal, so
+# it would be substituted on the way over instead of by the shell - and a bare
+# $VAR aborts the whole script under set -u when it is unset, which is normal
+# on a jump host without logind (Alpine, OpenWrt, a container, UsePAM no).
+# That abort reported every address in the batch as "timed out".
+cm=$(printenv XDG_RUNTIME_DIR 2>/dev/null || true)
+[ -n "$cm" ] || cm=$(printenv HOME 2>/dev/null || true)/.cache
 cm=$cm/bm-fleet
 mkdir -p "$cm" 2>/dev/null && chmod 700 "$cm" 2>/dev/null || cm="$d"
 : > "$d/hosts"
@@ -116,18 +127,30 @@ fi
 if [ "$ST" = "0" ]; then
   set -- "$@" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null
 fi
+# timeout is what stops one wedged machine from holding up the whole batch;
+# on a jump host stripped down to just ssh/sshpass (BusyBox without coreutils)
+# it may not exist. Falling back to running ssh directly - rather than letting
+# the shell fail the command with "timeout: not found" - is the degraded mode
+# Module settings warns about, not a hard failure; without this, every address
+# in the batch used to come back misreported as "no sshpass" (rc 127 means
+# whichever of the two commands after it is missing, not specifically that one).
+if command -v timeout >/dev/null 2>&1; then
+  run() { timeout "$HT" "$@"; }
+else
+  run() { "$@"; }
+fi
 case "$auth" in
   password)
-    timeout "$HT" sshpass -f "$d/p-$ip" ssh -o PubkeyAuthentication=no \
+    run sshpass -f "$d/p-$ip" ssh -o PubkeyAuthentication=no \
       -o PreferredAuthentications=password,keyboard-interactive \
       "$@" "$user@$ip" 'sh -s' < "$d/s-$ip" > "$d/o-$ip" 2> "$d/e-$ip"
     ;;
   key)
-    timeout "$HT" ssh -o BatchMode=yes -o IdentitiesOnly=yes -i "$key" \
+    run ssh -o BatchMode=yes -o IdentitiesOnly=yes -i "$key" \
       "$@" "$user@$ip" 'sh -s' < "$d/s-$ip" > "$d/o-$ip" 2> "$d/e-$ip"
     ;;
   *)
-    timeout "$HT" ssh -o BatchMode=yes \
+    run ssh -o BatchMode=yes \
       "$@" "$user@$ip" 'sh -s' < "$d/s-$ip" > "$d/o-$ip" 2> "$d/e-$ip"
     ;;
 esac
@@ -137,18 +160,24 @@ printf '%s\n' "$?" > "$d/r-$ip"
 rm -f "$d/p-$ip" "$d/s-$ip"
 WORKER
 
+# The reporting loop below only needs the addresses, so keep those separately.
+# That lets the record file - which carries every host's password - be deleted
+# as soon as the workers have read it, instead of living for the whole batch
+# and, if the exec is hard-killed before the trap runs, until the sweep above.
+cut -f2 "$d/hosts" > "$d/ips"
+
 # -I makes xargs treat each whole line as one argument, so the tabs inside a
 # record survive; @ appears nowhere else in the arguments below.
 xargs -a "$d/hosts" -P "$P" -I@ sh "$d/worker" @ "$d" "$cm" "$CT" "$HT" "$CP" "$ST"
+rm -f "$d/hosts"
 
-while IFS= read -r line; do
-  ip=$(printf '%s' "$line" | cut -f2)
+while IFS= read -r ip; do
   printf '===BMHOST===\n%s\n===BMRC===\n%s\n===BMOUT===\n' "$ip" "$(cat "$d/r-$ip" 2>/dev/null || echo 255)"
   cat "$d/o-$ip" 2>/dev/null
   printf '===BMERR===\n'
   head -c 2000 "$d/e-$ip" 2>/dev/null
   printf '\n'
-done < "$d/hosts"
+done < "$d/ips"
 `
 
 /**
@@ -280,6 +309,14 @@ export async function runFanout(
   opts?: {
     onProgress?: (done: number, total: number) => void
     cancelled?: () => boolean
+    /**
+     * Aborts the batch currently in flight, not just the next one.
+     * `cancelled` alone is only polled between batches, so a caller that only
+     * had that could stop the *next* batch from starting but not free the
+     * jump host from one already running - which could hold it for the full
+     * `sweepTimeoutSec` after a cancel or a module disable.
+     */
+    signal?: AbortSignal
   }
 ): Promise<FanoutResult[]> {
   if (targets.length === 0) return []
@@ -287,12 +324,13 @@ export async function runFanout(
   const command = `sh -c ${shQuote(FANOUT_SCRIPT)}`
   const results: FanoutResult[] = []
   for (let offset = 0; offset < targets.length; offset += batchSize) {
-    if (opts?.cancelled?.()) break
+    if (opts?.cancelled?.() || opts?.signal?.aborted) break
     if (!ctx.connected) break
     const batch = targets.slice(offset, offset + batchSize)
     const res = await ctx.exec(command, {
       stdin: stdinFor(batch, sharedPayload, rules),
-      timeoutMs: Math.max(30, Math.trunc(rules.sweepTimeoutSec)) * 1000
+      timeoutMs: Math.max(30, Math.trunc(rules.sweepTimeoutSec)) * 1000,
+      signal: opts?.signal
     })
     const parsed = parseFrames(res.stdout)
     const byIp = new Map(parsed.map((entry) => [entry.ip, entry]))

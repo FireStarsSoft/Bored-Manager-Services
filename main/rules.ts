@@ -110,15 +110,3 @@ export function effectiveRules(ctx: ModuleContext): FleetRules {
   }
   return out
 }
-
-/** Which rules the user has actually overridden, for the settings page. */
-export function overriddenRuleKeys(ctx: ModuleContext): Set<string> {
-  const raw = ctx.configGet()
-  const overrides = (raw as { rules?: unknown } | null)?.rules
-  if (typeof overrides !== 'object' || overrides === null) return new Set()
-  const out = new Set<string>()
-  for (const key of Object.keys(DEFAULT_RULES)) {
-    if ((overrides as Record<string, unknown>)[key] !== undefined) out.add(key)
-  }
-  return out
-}

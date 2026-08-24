@@ -18,8 +18,10 @@ export interface JumpCapabilities {
   mktemp: boolean
   nc: boolean
   sshVersion: string
-  /** Non-null when the module cannot work at all from here. */
+  /** Non-null when the module cannot work at all from here - blocks a sweep. */
   problem: string | null
+  /** Non-null for something that only degrades a sweep (missing `timeout`) - does not block one. */
+  warning: string | null
 }
 
 const TOOLS = ['ssh', 'sshpass', 'xargs', 'base64', 'timeout', 'mktemp', 'nc'] as const
@@ -43,7 +45,8 @@ export function emptyCapabilities(): JumpCapabilities {
     mktemp: false,
     nc: false,
     sshVersion: '',
-    problem: 'Not connected to a machine yet.'
+    problem: 'Not connected to a machine yet.',
+    warning: null
   }
 }
 
@@ -68,14 +71,17 @@ export async function probeJumpHost(ctx: ModuleContext): Promise<JumpCapabilitie
     mktemp: found.has('mktemp'),
     nc: found.has('nc'),
     sshVersion: (sections.get('VERSION') ?? '').trim().split('\n')[0] ?? '',
-    problem: null
+    problem: null,
+    warning: null
   }
   const missing = (['ssh', 'xargs', 'base64', 'mktemp'] as const).filter((tool) => !out[tool])
   if (missing.length) {
     out.problem = `The connected machine has no ${missing.join(', ')}. Install openssh-client and coreutils on it, or connect to a machine that has them.`
   } else if (!out.timeout) {
-    out.problem =
-      'The connected machine has no `timeout`, so one unresponsive machine can hold a sweep until the whole command times out.'
+    // Degraded, not blocking: the fan-out script falls back to running ssh
+    // without a per-host limit when `timeout` itself is missing (fanout.ts).
+    out.warning =
+      'The connected machine has no `timeout`, so one unresponsive machine is not cut off early - it can hold up its own batch for the whole sweep timeout instead of just its own share of it.'
   }
   return out
 }

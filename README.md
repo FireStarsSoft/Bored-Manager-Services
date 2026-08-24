@@ -22,6 +22,8 @@ That means the connected machine needs:
 
 Settings → Module settings shows exactly which of these were found. SSH connections are multiplexed (`ControlMaster` / `ControlPersist`), so the second sweep of a subnet is much faster than the first — that is what makes a `/24` practical.
 
+The address rules, watched units and roster all belong to the module, not to whichever machine happens to be the jump host - connect a second machine with this module enabled and it reaches the *same* fleet. So that the automatic sweep does not run twice against it, only one connected machine's instance runs it: whichever has this module's tab open, or the one that connected first if none does. A manually pressed "Sweep now" always runs, from whichever machine is open.
+
 ## Which machines get a card
 
 An address inside a subnet only earns a card once something at that address answers. Three things count:
@@ -97,7 +99,7 @@ Only the sweep, the jobs, and four explicit buttons (Probe, Test, a unit's detai
 
 | File | What |
 |---|---|
-| `main/index.ts` | `activate`: builds everything, registers all 36 methods, owns the lifecycle |
+| `main/index.ts` | `activate`: builds everything, registers every method the manifest declares, owns the lifecycle |
 | `main/fanout.ts` | The jump-host script, the stdin protocol, and the framing that survives `xargs -P` |
 | `main/units.ts` | The scripts that run on the monitored machines, and their parsers |
 | `main/sweep.ts` | The poller: plan the addresses, fan out, publish the wall |

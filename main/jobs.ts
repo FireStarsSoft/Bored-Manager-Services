@@ -52,6 +52,13 @@ export class FleetJobs {
   private cancelling = new Set<string>()
   private lastEmit = 0
   private emitTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * True once the module has been stopped. Every ctx member is revoked at
+   * that point, so anything still in flight has to return quietly rather than
+   * report, log or persist - a throw from a promise nobody awaits used to
+   * take the whole server down with it.
+   */
+  private stopped = false
 
   constructor(
     private ctx: ModuleContext,
@@ -77,6 +84,11 @@ export class FleetJobs {
    * package is worse than a slightly late stop - and no new batch starts.
    */
   dispose(): void {
+    // Set first: a run() that is mid-await returns here, and every ctx call
+    // it would have made on the way out is skipped. The context is revoked
+    // the moment dispose() returns, so a late emit, log or store write would
+    // otherwise reject from a promise nobody is holding.
+    this.stopped = true
     for (const job of this.live) this.cancelling.add(job.id)
     this.live = []
     if (this.emitTimer) clearTimeout(this.emitTimer)
@@ -86,6 +98,9 @@ export class FleetJobs {
   /** The connection these were running over has gone; they cannot be resumed. */
   reset(): void {
     this.dispose()
+    // Unlike dispose(), reset() is followed by more work on the same
+    // instance: the module stays live, it is the machine that changed.
+    this.stopped = false
   }
 
   start(spec: JobSpec): FleetJob {
@@ -103,7 +118,11 @@ export class FleetJobs {
     }
     this.live.unshift(job)
     this.emit(true)
-    void this.run(job, spec)
+    // The run owns its own failures: nothing awaits this promise, and an
+    // unhandled rejection used to be fatal for the whole server.
+    void this.run(job, spec).catch((err) => {
+      if (!this.stopped) this.ctx.log(`service-fleet: job ${job.id} failed: ${message(err)}`)
+    })
     return job
   }
 
@@ -147,6 +166,7 @@ export class FleetJobs {
     try {
       await spec.run(report, cancelled)
     } catch (err) {
+      if (this.stopped) return
       this.ctx.log(`service-fleet: job ${job.id} stopped unexpectedly: ${message(err)}`)
       for (const item of job.items) {
         if (item.status !== 'pending') continue
@@ -156,6 +176,11 @@ export class FleetJobs {
         job.failed++
       }
     }
+
+    // The module may have been switched off, reloaded or disconnected while
+    // the fan-out was in flight. Its context is gone, so there is nobody left
+    // to report to and nowhere left to write.
+    if (this.stopped) return
 
     // Anything the runner never got to: cancelled if the user asked, skipped if
     // the fan-out stopped early (the connection went, the sweep timed out).
@@ -216,6 +241,7 @@ export class FleetJobs {
    * is skipped, so the last state of a burst is never the one dropped.
    */
   private emit(now = false): void {
+    if (this.stopped) return
     const since = Date.now() - this.lastEmit
     if (!now && since < EMIT_THROTTLE_MS) {
       if (!this.emitTimer) {

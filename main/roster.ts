@@ -163,12 +163,30 @@ function relative(from: number | null): string {
  */
 export class Roster {
   private live = new Map<string, HostLive>()
+  /**
+   * Bumped whenever `live` or the stored records change. The two table
+   * payloads below are built from nothing else, so between two changes they
+   * are the same answer - and they are asked for on every fast tick, which on
+   * a /24 of machines running a hundred units each means tens of thousands of
+   * rows rebuilt and re-sorted a few times a minute for a table that did not
+   * move.
+   */
+  private generation = 0
+  private rows: { generation: number; hosts?: Array<Record<string, unknown>>; units?: Array<Record<string, unknown>> } = {
+    generation: -1
+  }
 
   constructor(private store: HostStore) {}
 
   reset(): void {
     this.live.clear()
     this.store.reset()
+    this.generation++
+  }
+
+  /** Write what the roster holds in memory, whether or not `mergeInto` called it a change. */
+  flush(): void {
+    this.store.persist()
   }
 
   get size(): number {
@@ -184,20 +202,31 @@ export class Roster {
   }
 
   /**
-   * Fold one sweep in, replacing what was live before: the sweep covered every
-   * configured address, so anything missing from it is no longer configured.
+   * Fold one sweep in. A full sweep replaces what was live before - it covered
+   * every configured address, so anything missing from it is no longer
+   * configured. `partial` (a sweep cut short by cancel or a module/machine
+   * going away) did not cover every address, so it merges its entries onto
+   * whatever was already live instead - otherwise every address not yet
+   * reached that round would vanish from the wall, the Services table and
+   * bulk targeting until the next sweep completes in full.
    *
    * Writes to disk only when a record actually changed, so a sweep every two
    * minutes does not mean a file write every two minutes.
    */
-  apply(entries: readonly SweepEntry[], watched: readonly WatchedUnit[], rules: FleetRules): void {
-    const nextLive = new Map<string, HostLive>()
+  apply(
+    entries: readonly SweepEntry[],
+    watched: readonly WatchedUnit[],
+    rules: FleetRules,
+    opts?: { partial?: boolean }
+  ): void {
+    const nextLive = opts?.partial ? new Map(this.live) : new Map<string, HostLive>()
     const dirty = this.mergeInto(nextLive, entries, watched, rules)
     // The document is the store's own cached object, so the roster is already up
     // to date in memory either way; the disk only hears about it when something
     // a person would notice changed.
     if (dirty) this.store.persist()
     this.live = nextLive
+    this.generation++
   }
 
   /**
@@ -206,6 +235,7 @@ export class Roster {
    */
   applyOne(entry: SweepEntry, watched: readonly WatchedUnit[], rules: FleetRules): void {
     if (this.mergeInto(this.live, [entry], watched, rules)) this.store.persist()
+    this.generation++
   }
 
   private mergeInto(
@@ -235,10 +265,14 @@ export class Roster {
         reachNote: entry.reachMessage,
         pinned: pinned || existing?.pinned === true
       }
-      // lastProbeAt moves on every sweep and would make every sweep a write, so
-      // it is not part of what "changed" means.
-      const before = existing ? { ...existing, lastProbeAt: 0 } : null
-      const after = { ...record, lastProbeAt: 0 }
+      // lastProbeAt moves on every sweep, and lastSeen on every sweep that
+      // reaches the machine - a fleet that is up would mean a disk write every
+      // two minutes for every machine in it, which is exactly what the module
+      // rules say not to do. Neither is part of what "changed" means; both are
+      // in the record either way, so the next real change - or dispose(),
+      // which flushes - writes the current values out with it.
+      const before = existing ? { ...existing, lastProbeAt: 0, lastSeen: 0 } : null
+      const after = { ...record, lastProbeAt: 0, lastSeen: 0 }
       if (!before || JSON.stringify(before) !== JSON.stringify(after)) dirty = true
       data.hosts[entry.ip] = record
       into.set(entry.ip, this.buildLive(entry, record, watched, rules))
@@ -254,6 +288,7 @@ export class Roster {
       delete d.hosts[ip]
     })
     this.live.delete(ip)
+    this.generation++
     return true
   }
 
@@ -266,6 +301,7 @@ export class Roster {
       for (const ip of orphans) delete d.hosts[ip]
     })
     for (const ip of orphans) this.live.delete(ip)
+    this.generation++
     return orphans.length
   }
 
@@ -429,8 +465,25 @@ export class Roster {
     return { t: Date.now(), hosts, counts }
   }
 
+  /** Cleared whenever the roster changes; see `generation`. */
+  private rowCache(): { generation: number; hosts?: Array<Record<string, unknown>>; units?: Array<Record<string, unknown>> } {
+    if (this.rows.generation !== this.generation) this.rows = { generation: this.generation }
+    return this.rows
+  }
+
   /** The Machines page: one row per address in the roster. */
   hostRows(): Array<Record<string, unknown>> {
+    const cache = this.rowCache()
+    return (cache.hosts ??= this.buildHostRows())
+  }
+
+  /** The Services page: one row per machine and unit, so a bulk action can tick across machines. */
+  unitRows(): Array<Record<string, unknown>> {
+    const cache = this.rowCache()
+    return (cache.units ??= this.buildUnitRows())
+  }
+
+  private buildHostRows(): Array<Record<string, unknown>> {
     const records = this.store.read().hosts
     const rows = Object.values(records).map((record) => {
       const live = this.live.get(record.ip)
@@ -451,7 +504,7 @@ export class Roster {
         watched: watchedTotal ? `${watchedOk}/${watchedTotal}` : '—',
         running: live?.facts?.units.filter((u) => u.active === 'active').length ?? 0,
         failed: live?.facts?.units.filter((u) => u.active === 'failed' || u.sub === 'failed').length ?? 0,
-        lastSeen: record.lastSeen ?? 0,
+        lastSeen: record.lastSeen ?? null,
         pinned: record.pinned ? 'yes' : '',
         username: live?.cred.username ?? '',
         port: live?.cred.port ?? 22,
@@ -462,8 +515,7 @@ export class Roster {
     return rows
   }
 
-  /** The Services page: one row per machine and unit, so a bulk action can tick across machines. */
-  unitRows(): Array<Record<string, unknown>> {
+  private buildUnitRows(): Array<Record<string, unknown>> {
     const out: Array<Record<string, unknown>> = []
     for (const live of this.live.values()) {
       for (const { state, watched, severity } of this.unitsFor(live.ip)) {
@@ -517,9 +569,9 @@ export class Roster {
       uptimeSec: facts?.uptimeSec ?? 0,
       running: facts?.units.filter((u) => u.active === 'active').length ?? 0,
       failed: facts?.units.filter((u) => u.active === 'failed' || u.sub === 'failed').length ?? 0,
-      firstSeen: record?.firstSeen ?? 0,
-      lastSeen: record?.lastSeen ?? 0,
-      lastProbeAt: record?.lastProbeAt ?? 0
+      firstSeen: record?.firstSeen ?? null,
+      lastSeen: record?.lastSeen ?? null,
+      lastProbeAt: record?.lastProbeAt ?? null
     }
   }
 

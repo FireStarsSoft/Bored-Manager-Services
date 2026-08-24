@@ -71,6 +71,7 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
     capabilities = next
     ctx.emit('capabilities', capabilities)
     if (capabilities.problem) ctx.log(`service-fleet: ${capabilities.problem}`)
+    else if (capabilities.warning) ctx.log(`service-fleet: ${capabilities.warning}`)
     return capabilities
   }
 
@@ -80,7 +81,6 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
   ctx.handle('hostRows', () => roster.hostRows())
   ctx.handle('unitRows', () => roster.unitRows())
   ctx.handle('hostInspect', (ip: unknown) => roster.inspect(String(ip ?? '')))
-  ctx.handle('jobs', () => jobs.list())
   ctx.handle('targets', () => targets.rows())
   ctx.handle('watched', () => watched.rows())
   ctx.handle('rulesEffective', () => rulesEditor.effective())
@@ -138,7 +138,10 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
       config.read().watched,
       rules
     )
-    await sweeper.refreshOne(ip).catch(() => undefined)
+    // The roster already has this machine's new state from the fan-out above,
+    // so the wall only needs republishing - refreshOne() would fan out to the
+    // same machine a second time for the same answer.
+    sweeper.publishCards(rules)
     return reach === 'ok' ? { ok: true, data: reachMessage(reach, result) } : { ok: false, error: reachMessage(reach, result) }
   })
 
@@ -206,21 +209,26 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
   return {
     applyPollers() {
       const seconds = Math.max(0, ctx.slowIntervalSec(INTERVAL_KEY))
-      const key = `${ctx.connected}|${seconds}`
+      const primary = ctx.isPrimaryInstance
+      const key = `${ctx.connected}|${seconds}|${primary}`
       if (key === applied) return
       applied = key
       sweeper.poller.stop()
-      if (!ctx.connected) return
+      // The sweep reaches a subnet the user configured, not this instance's
+      // own connected machine - two connected machines both enabled for this
+      // module would otherwise fan out the same sweep twice. Only the elected
+      // primary runs it automatically; a manual "sweep now" is unaffected.
+      if (!ctx.connected || !primary) return
       // Asking the jump host what it can do is the first thing that happens on a
       // connection, because everything else depends on the answer. The module can
       // be switched off while that is in flight, so the continuation checks.
       void refreshCapabilities().then(
         () => {
-          if (stopped || !ctx.connected) return
+          if (stopped || !ctx.connected || applied !== key) return
           if (seconds > 0) sweeper.poller.start(seconds * 1000)
           // Manual only: still sweep once, so the page is not empty until the
           // user finds the refresh button.
-          else if (!sweeper.latest) void sweeper.run()
+          else if (!sweeper.latest) void sweeper.run().catch(() => undefined)
         },
         () => undefined
       )
@@ -265,8 +273,11 @@ const activate: ModuleActivate = (ctx: ModuleContext) => {
 
     dispose() {
       stopped = true
+      // lastSeen alone is not worth a disk write per sweep (see mergeInto), so
+      // the last one a sweep recorded is written out here instead.
+      roster.flush()
       sweeper.poller.stop()
-      sweeper.cancel()
+      sweeper.stop()
       jobs.dispose()
       actions.dispose()
     }

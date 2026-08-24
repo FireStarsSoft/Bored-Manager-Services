@@ -94,6 +94,15 @@ export class Sweeper {
 
   private inFlight: Promise<void> | null = null
   private cancelRequested = false
+  /** Owned by the sweep currently running, so `cancel()` can kill its in-flight batch instead of only stopping the next one. */
+  private abortController: AbortController | null = null
+  /**
+   * True once the module has been stopped. A sweep can sit in `runFanout` for
+   * the whole sweep timeout, and by the time it comes back the context may be
+   * revoked - so everything after an await checks this before emitting,
+   * logging or writing.
+   */
+  private stopped = false
 
   constructor(
     private ctx: ModuleContext,
@@ -117,10 +126,25 @@ export class Sweeper {
   }
 
   cancel(): void {
-    if (this.inFlight) this.cancelRequested = true
+    if (!this.inFlight) return
+    this.cancelRequested = true
+    // Aborts whichever batch runFanout is waiting on right now. Without this,
+    // the jump host kept fanning out to the fleet for up to sweepTimeoutSec
+    // after a cancel (or a module disable, via stop() below) because
+    // cancelRequested alone is only checked between batches.
+    this.abortController?.abort()
+  }
+
+  /** The module is going away: stop reporting on work that is still in flight. */
+  stop(): void {
+    this.stopped = true
+    this.cancel()
   }
 
   reset(): void {
+    // reset() means "the machine changed", not "the module is gone": the
+    // instance keeps running, so it may report again.
+    this.stopped = false
     this.cancelRequested = false
     this.latest = null
     this.series = []
@@ -158,14 +182,20 @@ export class Sweeper {
 
   private setStatus(patch: Partial<SweepStatus>): void {
     this.status = { ...this.status, ...patch, t: Date.now() }
+    if (this.stopped) return
     this.ctx.emit('sweep', this.status)
   }
 
-  /** The wall, and nothing else - safe to call after a single machine changed. */
-  private publishCards(rules: FleetRules): HostsPayload {
+  /**
+   * The wall, and nothing else - safe to call after a single machine changed.
+   * Public because a caller that has already re-read a machine itself
+   * (hostProbe) only needs the cards republished: going through `refreshOne`
+   * would open a second SSH session to say what it already knows.
+   */
+  publishCards(rules: FleetRules = this.deps.rules()): HostsPayload {
     const payload = this.roster.cards(rules)
     this.latest = payload
-    this.ctx.emit('hosts', payload)
+    if (!this.stopped) this.ctx.emit('hosts', payload)
     return payload
   }
 
@@ -186,6 +216,7 @@ export class Sweeper {
     this.series.push(point)
     const cutoff = point.t - SERIES_MS
     while (this.series.length && this.series[0].t < cutoff) this.series.shift()
+    if (this.stopped) return
     this.ctx.emit('series', point)
     this.ctx.addHistory({
       t: point.t,
@@ -220,6 +251,7 @@ export class Sweeper {
     }
 
     this.cancelRequested = false
+    this.abortController = new AbortController()
     const startedAt = Date.now()
     this.setStatus({
       state: 'running',
@@ -235,9 +267,11 @@ export class Sweeper {
     try {
       results = await runFanout(this.ctx, plan.targets, payload, rules, {
         onProgress: (done, total) => this.setStatus({ done, total }),
-        cancelled: () => this.cancelRequested
+        cancelled: () => this.cancelRequested,
+        signal: this.abortController.signal
       })
     } catch (err) {
+      if (this.stopped) return
       this.setStatus({
         state: 'error',
         finishedAt: Date.now(),
@@ -245,7 +279,15 @@ export class Sweeper {
         message: err instanceof Error ? err.message : String(err)
       })
       return
+    } finally {
+      // Its job - being available for cancel() to abort - ends the moment
+      // runFanout settles; a stray reference here would abort nothing but
+      // could be mistaken for one still worth aborting.
+      this.abortController = null
     }
+    // runFanout can hold this for the whole sweep timeout; the module may
+    // have been switched off, reloaded or disconnected in the meantime.
+    if (this.stopped) return
 
     const byIp = new Map(plan.targets.map((target) => [target.ip, target]))
     const entries = results.map((result) => {
@@ -267,7 +309,11 @@ export class Sweeper {
       }
     })
 
-    this.roster.apply(entries, config.watched, rules)
+    // A sweep cancelled early only covers a prefix of plan.targets - applying
+    // it as a full sweep would read as "every address not yet reached this
+    // round is no longer configured" and drop it from the wall, the Services
+    // table and bulk targeting until the next full sweep completes.
+    this.roster.apply(entries, config.watched, rules, { partial: this.cancelRequested })
     this.publish(rules)
     const reached = entries.filter((entry) => entry.reach === 'ok').length
     const durationMs = Date.now() - startedAt

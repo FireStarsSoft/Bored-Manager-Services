@@ -28,6 +28,7 @@
       "title": "Fleet",
       "columns": 4,
       "slowTarget": "service-fleet",
+      "slowAt": { "kind": "stream", "event": "hosts", "path": "t" },
       "blocks": [
         {
           "type": "stat",
@@ -116,7 +117,7 @@
                 { "key": "fileState", "label": "At boot" }
               ],
               "sortDefault": { "key": "unit", "dir": "asc" },
-              "filterKeys": ["unit", "health", "description"],
+              "filterKeys": ["unit", "health"],
               "emptyText": "Nothing was read from this machine",
               "rowActions": [
                 {

@@ -164,19 +164,19 @@ function normalize(raw: unknown): FleetConfig {
 }
 
 /**
- * Reads through a cache and writes through it. Unlike per-host data this is not
- * keyed by the connected machine, so the cache only has to be dropped when this
- * module writes - and on reset, in case something else rewrote the file while
- * the module was idle.
+ * Config is shared by every connected-machine instance of this module, and
+ * the file is documented as one a user may hand-edit. Read it afresh so an
+ * edit made from one connected machine - or by hand, while nothing is
+ * connected to it at all - is immediately visible to every instance and
+ * cannot be overwritten from a stale cache. It used to cache indefinitely,
+ * so a second connected machine's edit could silently vanish under whichever
+ * instance wrote next.
  */
 export class ConfigStore {
-  private cache: FleetConfig | null = null
-
   constructor(private ctx: ModuleContext) {}
 
   read(): FleetConfig {
-    if (!this.cache) this.cache = normalize(this.ctx.configGet())
-    return this.cache
+    return normalize(this.ctx.configGet())
   }
 
   /**
@@ -192,7 +192,7 @@ export class ConfigStore {
   }
 
   reset(): void {
-    this.cache = null
+    // No in-memory document to invalidate.
   }
 }
 

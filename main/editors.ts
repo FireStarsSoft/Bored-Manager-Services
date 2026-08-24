@@ -566,6 +566,7 @@ export class RulesEditor {
 
     // Checkboxes are always sent, so they are always an override - the form
     // writes them as shown, which is why the values in force are printed above it.
+    const current = effectiveRules(this.ctx)
     for (const key of ['strictHostKey', 'criticalDownIsRed'] as const) {
       if (typeof values[key] === 'boolean') overrides[key] = values[key] as boolean
     }
@@ -575,6 +576,19 @@ export class RulesEditor {
         label: 'Strict host key checking will be on',
         detail:
           'Every machine has to already be in the known_hosts of the account this app connects as, or it will be refused.'
+      })
+    }
+    // A checkbox has no "untouched" state: the form always sends what it is
+    // showing, and it starts unticked. Saving this page to change something
+    // else therefore turns a host-key check that was on back off, silently
+    // dropping the protection against a machine that is not the one it was.
+    // The check step is the only place that can say so.
+    if (current.strictHostKey && overrides.strictHostKey === false) {
+      findings.push({
+        level: 'warning',
+        label: 'Strict host key checking will be turned OFF',
+        detail:
+          'It is on at the moment. Tick "Check host keys" before applying unless switching it off is what you meant - the form sends the box as shown, not as it was.'
       })
     }
 
