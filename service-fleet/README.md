@@ -2,6 +2,21 @@
 
 Watch and control systemd services across every machine in an IP range, from the one machine Bored Manager is connected to.
 
+## Installing
+
+This module is not part of the app download. Install it from **Settings →
+Modules**, by any of:
+
+- **Official list** - pick *Services* from the list the app ships;
+- **GitHub repo** - `FireStarsSoft/Bored-Manager-Services`, which installs the
+  latest release;
+- **From file** - the `service-fleet-<version>.zip` attached to a
+  [release](https://github.com/FireStarsSoft/Bored-Manager-Services/releases).
+
+It needs Bored Manager **0.3.2** or newer, and installs switched off; enable
+it in the same place. Source, issues and changelog live in
+[FireStarsSoft/Bored-Manager-Services](https://github.com/FireStarsSoft/Bored-Manager-Services).
+
 ## What it adds
 
 | Where | What |
