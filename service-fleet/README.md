@@ -13,7 +13,7 @@ Modules**, by any of:
 - **From file** - the `service-fleet-<version>.zip` attached to a
   [release](https://github.com/FireStarsSoft/Bored-Manager-Services/releases).
 
-It needs Bored Manager **0.3.2** or newer, and installs switched off; enable
+It needs Bored Manager **0.4.0** or newer, and installs switched off; enable
 it in the same place. Source, issues and changelog live in
 [FireStarsSoft/Bored-Manager-Services](https://github.com/FireStarsSoft/Bored-Manager-Services).
 

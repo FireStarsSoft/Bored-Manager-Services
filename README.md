@@ -23,7 +23,7 @@ You do not need this repository to use the module. In Bored Manager, open
 | GitHub repo | `FireStarsSoft/Bored-Manager-Services` |
 | Zip URL / file | the `service-fleet-<version>.zip` attached to a [release](../../releases) |
 
-It needs Bored Manager **0.3.2** or newer and installs **switched off** —
+It needs Bored Manager **0.4.0** or newer and installs **switched off** —
 enable it in the same place. Bored Manager **0.4.2** is the first app
 release that does not bundle it; an older app already carrying version 1.1.8
 keeps it across the update and can update to 1.1.9 from here without losing its

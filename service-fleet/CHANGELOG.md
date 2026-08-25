@@ -1,6 +1,6 @@
 # Changelog
 
-Module versions are independent of the app's. Needs Bored Manager **0.3.2** for the `pie` block.
+Module versions are independent of the app's. Needs Bored Manager **0.4.0** for `ctx.isPrimaryInstance`; the `pie` block arrived in 0.3.3.
 
 ## 1.1.9
 
@@ -14,6 +14,10 @@ Module versions are independent of the app's. Needs Bored Manager **0.3.2** for 
   here.
 - README: an Installing section, since the module is no longer in the app
   download, and a link back to the repository.
+- `minAppVersion` corrected to **0.4.0**. The manifest said `0.3.2`, but the
+  fleet sweep reads `ctx.isPrimaryInstance`, which the app only provides
+  from 0.4.0, and the summary widget's `pie` block only exists from 0.3.3.
+  On anything older the install passed the version gate and then failed.
 
 ## 1.1.8
 
