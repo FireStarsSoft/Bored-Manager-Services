@@ -4,13 +4,23 @@
 // Usage:
 //   node scripts/package-agent.mjs [output-dir]
 //
-// The archive is **byte-reproducible**: every entry carries a fixed timestamp,
-// a fixed owner and fixed permissions rather than whatever the packing machine
-// happened to have, and the entries are sorted. That is the whole point. The
-// module compiles a sha256 into `main/agent/manifest.ts`, every target machine
-// checks the download against it before unpacking, and a hash that could only
-// come from one particular run on one particular machine would be worthless as
-// a promise about the source.
+// **The tar is byte-reproducible; the gzip wrapper is not.** Every entry carries
+// a fixed timestamp, a fixed owner and fixed permissions rather than whatever
+// the packing machine happened to have, and the entries are sorted - so the
+// inner tar is identical on any platform for the same source, and its sha256 is
+// a genuine property of that source.
+//
+// The gzip layer is a different matter: different zlib builds compress the same
+// input to different bytes, so packing on Windows and packing on a CI runner
+// produce `.tar.gz` files of the same length and different hashes. Verified, not
+// assumed - it is exactly what happened the first time this was released.
+//
+// The consequence is a rule rather than a workaround. The sha256 the module
+// compiles into `main/agent/manifest.ts` is the one every target machine checks
+// the *download* against, so it has to be the hash of the published asset -
+// read back off the release, never taken from a local pack. Both hashes are
+// printed below so the tar one can be used to answer "did the source change"
+// independently of who compressed it.
 //
 // The tar writer is hand-rolled for the same reason the zip writer next door
 // is: Node ships no tar, and shelling out to the system `tar` would make the
@@ -53,7 +63,10 @@ function agentVersion() {
  * how something nobody meant to publish gets published.
  */
 const INCLUDE_DIRS = ['boredagent', 'config', 'systemd', 'install']
-const INCLUDE_FILES = ['pyproject.toml', 'requirements.txt', 'README.md', 'SPEC.md']
+// SPEC.md is deliberately absent: it describes the contract for whoever is
+// working on the agent, and lives in the repository. Shipping it meant a
+// documentation fix changed the artifact and needed a new release.
+const INCLUDE_FILES = ['pyproject.toml', 'requirements.txt', 'README.md']
 
 /** Never packed, whatever a directory above says. */
 const EXCLUDE_DIRS = new Set(['__pycache__', '.pytest_cache', 'venv', '.venv', 'tests', '.git'])
@@ -172,12 +185,18 @@ const tarPath = join(outputDir, tarName)
 writeFileSync(tarPath, gz)
 
 const sha256 = createHash('sha256').update(gz).digest('hex')
+const tarSha256 = createHash('sha256').update(tar).digest('hex')
 writeFileSync(join(outputDir, `${tarName}.sha256`), `${sha256}  ${tarName}\n`)
+// The inner tar's hash is the platform-independent one. Written beside the
+// archive so a release can be checked against the source from any machine.
+writeFileSync(join(outputDir, `${tarName}.tarsha256`), `${tarSha256}  ${tarName.replace(/\.gz$/, '')}\n`)
 
 console.log(`\n==> ${tarPath}`)
 console.log(`    BoredAgent ${version} - ${members.length} files, ${(gz.length / 1024).toFixed(1)} KB`)
-console.log(`    sha256 ${sha256}`)
+console.log(`    sha256 (this .tar.gz)  ${sha256}`)
+console.log(`    sha256 (inner .tar)    ${tarSha256}`)
 console.log(`
-    Put that sha256 into AGENT_SHA256 in
-    service-fleet/main/agent/manifest.ts before releasing the module, and
-    attach this tarball to the agent-v${version} release.`)
+    The inner-tar hash is the same on every platform for this source; the
+    .tar.gz hash depends on which zlib compressed it. AGENT_SHA256 in
+    service-fleet/main/agent/manifest.ts must therefore be the hash of the
+    PUBLISHED asset - release the agent first, read the hash off it, then pin.`)

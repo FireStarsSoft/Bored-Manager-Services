@@ -17,20 +17,23 @@
  */
 
 /** The version of `agent/pyproject.toml` this module was built against. */
-export const AGENT_VERSION = '1.0.0'
+export const AGENT_VERSION = '1.0.1'
 
 /**
- * sha256 of `boredagent-<AGENT_VERSION>.tar.gz` as published.
+ * sha256 of `boredagent-<AGENT_VERSION>.tar.gz` **as published**.
  *
- * Measured from `npm run agent:pack`, which is byte-reproducible - the same
- * source always packs to the same bytes, so this is a property of the source
- * rather than of one build run. CI re-packs and compares before publishing.
+ * Read off the release asset, not off a local pack. The tar inside is
+ * byte-identical on any platform for the same source, but the gzip wrapper is
+ * not - different zlib builds compress the same bytes differently - so a hash
+ * taken from a laptop does not match the one CI publishes, and every install
+ * would fail its integrity check with a message about a corrupted download.
+ * That happened once; this comment is why it will not happen twice.
  *
  * Left empty, the module refuses to install from the network at all and offers
  * only the upload path: downloading something it cannot check would be worse
  * than not offering it.
  */
-export const AGENT_SHA256 = 'b0e80e05f701a7bb23d1d805f4316b2a8496abe7bb236b0218584d92edb913f8'
+export const AGENT_SHA256 = ''
 
 const RELEASE_BASE =
   'https://github.com/FireStarsSoft/Bored-Manager-Services/releases/download'

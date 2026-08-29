@@ -38,17 +38,27 @@ jobs:
         run: bash -n agent/install/agent-install.sh
       - run: npm ci
       - run: npm run agent:pack
-      # Packing is byte-reproducible, so packing twice has to produce the same
-      # bytes. If it does not, the sha256 the module compiles in is a property
-      # of one build rather than of the source, and checking it on a target
-      # machine would prove nothing.
-      - name: Verify the archive is reproducible
+      # Packing twice has to produce the same bytes. This catches the clock or
+      # the filesystem leaking into the archive; it does NOT prove the hash
+      # matches a pack made elsewhere, because the gzip wrapper depends on which
+      # zlib compressed it. The inner tar is the part that is identical
+      # everywhere, so it is compared too and printed for the record.
+      - name: Verify the archive is deterministic
         run: |
           set -euo pipefail
           node scripts/package-agent.mjs /tmp/again
           A="$(sha256sum dist/*.tar.gz | cut -d' ' -f1)"
           B="$(sha256sum /tmp/again/*.tar.gz | cut -d' ' -f1)"
-          test "$A" = "$B" || { echo "packing is not reproducible: $A vs $B" >&2; exit 1; }
+          test "$A" = "$B" || { echo "packing is not deterministic: $A vs $B" >&2; exit 1; }
+          gunzip -c dist/*.tar.gz > /tmp/a.tar
+          gunzip -c /tmp/again/*.tar.gz > /tmp/b.tar
+          TA="$(sha256sum /tmp/a.tar | cut -d' ' -f1)"
+          test "$TA" = "$(sha256sum /tmp/b.tar | cut -d' ' -f1)"
+          echo "inner tar sha256: $TA"
+          echo "This is the platform-independent hash of the source."
+          echo "AGENT_SHA256 in the module is the .tar.gz hash below, and has to"
+          echo "be read off the published asset rather than off a local pack."
+          echo "published .tar.gz sha256: $A"
       - name: Publish
         run: |
           set -euo pipefail

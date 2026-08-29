@@ -190,11 +190,20 @@ Removing the manager is not removing what it manages.
 ## 9. Releasing
 
 `agent/pyproject.toml` holds the version — the single source of truth. The
-tarball is packed by `npm run agent:pack` and is **byte-reproducible**: fixed
-mtime, fixed owner, fixed modes, sorted entries, gzip without a timestamp. That
-is what makes the sha256 a property of the source rather than of one build, and
-therefore worth compiling into the Services module and checking on every target
-machine before anything is unpacked.
+tarball is packed by `npm run agent:pack`: fixed mtime, fixed owner, fixed
+modes, sorted entries, gzip without a timestamp.
+
+**The tar is byte-reproducible across platforms; the gzip wrapper is not.**
+Different zlib builds compress identical input to different bytes, so a pack on
+a laptop and a pack on a CI runner give `.tar.gz` files of the same length and
+different hashes. The packer prints both hashes for that reason: the inner-tar
+one answers "did the source change" from anywhere, and the `.tar.gz` one is what
+a target machine checks its download against.
+
+So `AGENT_SHA256` in the module must be **the hash of the published asset**.
+Release the agent first, read the hash off the release, then pin it and release
+the module — which is the order [RELEASE.md](../../BoredManager-Main/docs/RELEASE.md)
+prescribes anyway.
 
 Tag `agent-v<version>`. The workflow verifies the tag matches `pyproject.toml`,
 runs the tests, checks the installer parses, packs twice and compares, then
