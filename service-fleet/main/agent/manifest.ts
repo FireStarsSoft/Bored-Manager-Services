@@ -33,7 +33,7 @@ export const AGENT_VERSION = '1.0.1'
  * only the upload path: downloading something it cannot check would be worse
  * than not offering it.
  */
-export const AGENT_SHA256 = ''
+export const AGENT_SHA256 = '0932d545e074a68de54b8a4b055ec0be7f3f5f26fc7ed767109c7bc7cf2a57c1'
 
 const RELEASE_BASE =
   'https://github.com/FireStarsSoft/Bored-Manager-Services/releases/download'
