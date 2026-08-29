@@ -1,57 +1,351 @@
 {
   "blocks": [
     {
-      "type": "section",
-      "title": "Jobs",
+      "type": "conditional",
+      "when": {
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "connected"
+        },
+        "op": "eq",
+        "value": false
+      },
       "blocks": [
         {
-          "type": "table",
-          "source": { "kind": "stream", "event": "jobs", "path": "jobs" },
-          "rowKey": "id",
-          "columns": [
-            { "key": "label", "label": "Job" },
-            { "key": "kind", "label": "Kind" },
-            { "key": "state", "label": "State" },
-            { "key": "progressPct", "label": "Progress", "format": "pct", "align": "right" },
-            { "key": "done", "label": "Done", "format": "number", "align": "right" },
-            { "key": "total", "label": "Machines", "format": "number", "align": "right" },
-            { "key": "failed", "label": "Failed", "format": "number", "align": "right" },
-            { "key": "startedAt", "label": "Started", "format": "duration", "align": "right" }
-          ],
-          "sortDefault": { "key": "startedAt", "dir": "desc" },
-          "filterKeys": ["label", "kind", "state"],
-          "groupModes": [{ "id": "kind", "label": "By kind", "key": "kind" }],
-          "emptyText": "Nothing has been run yet",
-          "rowActions": [
+          "type": "section",
+          "title": "Not connected to a machine",
+          "blocks": [
             {
-              "label": "Cancel",
-              "method": "jobCancel",
-              "argsFromRow": ["id"],
-              "confirm": "Stop this job? Machines already being contacted will finish.",
-              "kind": "danger"
-            }
-          ],
-          "rowDetail": [
-            {
-              "type": "list",
-              "source": { "kind": "stream", "event": "jobs", "path": "$row.items" },
-              "columns": [
-                { "key": "name", "label": "Machine" },
-                { "key": "status", "label": "Result" },
-                { "key": "message", "label": "Message" }
+              "type": "note",
+              "title": "This module works through a machine you are connected to",
+              "lines": [
+                "It reaches the rest of your network from there: SSH to find machines and install the agent, then HTTP to everything the agent runs.",
+                "Connect to a machine on the same network as the fleet - the machine list is in the sidebar - and this page fills in by itself."
               ],
-              "limit": 200,
-              "emptyText": "No machines in this job"
+              "tone": "info"
             }
           ]
-        },
+        }
+      ],
+      "else": [
         {
-          "type": "actions",
-          "actions": [
+          "type": "conditional",
+          "when": {
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "problem"
+            },
+            "op": "exists"
+          },
+          "blocks": [
             {
-              "label": "Clear finished",
-              "method": "jobsClear",
-              "confirm": "Forget every finished job? Running ones are left alone."
+              "type": "section",
+              "title": "This machine cannot reach the fleet",
+              "blocks": [
+                {
+                  "type": "keyValue",
+                  "source": {
+                    "kind": "stream",
+                    "event": "capabilities"
+                  },
+                  "rows": [
+                    {
+                      "key": "sshVersion",
+                      "label": "SSH client"
+                    },
+                    {
+                      "key": "problem",
+                      "label": "Problem"
+                    }
+                  ]
+                },
+                {
+                  "type": "note",
+                  "title": "What to do",
+                  "lines": [
+                    "Something the module cannot work without is missing on the machine you are connected to, so nothing has been read and no figure below would be real.",
+                    "Module settings lists every tool it looks for. Install the missing ones there, or connect to a machine that already has them."
+                  ],
+                  "tone": "warning"
+                },
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Check again",
+                      "method": "sweepNow"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "else": [
+            {
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "warning"
+                },
+                "op": "exists"
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Working, with something worth knowing",
+                  "lines": [
+                    "The fleet is being read, and one thing about the machine you are connected to makes it slower or less precise than it could be. Module settings names it."
+                  ],
+                  "tone": "warning"
+                }
+              ]
+            },
+            {
+              "type": "subnav",
+              "items": [
+                {
+                  "id": "running",
+                  "label": "Running",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What a job is",
+                          "lines": [
+                            "Anything that touches several machines at once: installing the agent, deploying a service, acting on ticked rows. Each has one line per machine, so a run where two of twenty failed says which two.",
+                            "Cancelling stops the machines not yet reached. It does not undo the ones already done - a half-installed agent is worse than a slightly late stop."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Jobs",
+                      "blocks": [
+                        {
+                          "type": "statusCards",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "jobRows",
+                            "intervalKey": "service-fleet"
+                          },
+                          "rowKey": "id",
+                          "titleKey": "label",
+                          "statusKey": "health",
+                          "subtitleKey": "progressLabel",
+                          "items": {
+                            "key": "chips",
+                            "labelKey": "label",
+                            "statusKey": "status",
+                            "pinnedKey": "pinned",
+                            "visibleRows": 2,
+                            "pinnedFilterLabel": "Only failures",
+                            "emptyText": "no results yet"
+                          },
+                          "columns": {
+                            "default": 2,
+                            "min": 1,
+                            "max": 4
+                          },
+                          "rowActions": [
+                            {
+                              "label": "Cancel",
+                              "method": "jobCancel",
+                              "argsFromRow": [
+                                "id"
+                              ],
+                              "confirm": "Cancel this job? Machines it has already reached are not undone.",
+                              "kind": "danger"
+                            }
+                          ],
+                          "rowDetail": [
+                            {
+                              "type": "section",
+                              "title": "What happened on each machine",
+                              "blocks": [
+                                {
+                                  "type": "table",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "jobItems",
+                                    "args": [
+                                      "$row.id"
+                                    ]
+                                  },
+                                  "columns": [
+                                    {
+                                      "key": "name",
+                                      "label": "Machine"
+                                    },
+                                    {
+                                      "key": "status",
+                                      "label": "Result"
+                                    },
+                                    {
+                                      "key": "message",
+                                      "label": "Detail"
+                                    },
+                                    {
+                                      "key": "ms",
+                                      "label": "Took",
+                                      "format": "duration",
+                                      "align": "right"
+                                    }
+                                  ],
+                                  "rowKey": "name",
+                                  "emptyText": "This job kept no per-machine detail."
+                                }
+                              ]
+                            }
+                          ],
+                          "emptyText": "No jobs yet. Installing an agent or deploying a service starts one."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "finished",
+                  "label": "History",
+                  "blocks": [
+                    {
+                      "type": "section",
+                      "title": "History",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "jobRows",
+                            "intervalKey": "service-fleet"
+                          },
+                          "columns": [
+                            {
+                              "key": "label",
+                              "label": "Job"
+                            },
+                            {
+                              "key": "stateBadges",
+                              "label": "Result",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "state",
+                              "label": "State"
+                            },
+                            {
+                              "key": "kind",
+                              "label": "Kind"
+                            },
+                            {
+                              "key": "done",
+                              "label": "Done",
+                              "align": "right"
+                            },
+                            {
+                              "key": "failed",
+                              "label": "Failed",
+                              "align": "right"
+                            },
+                            {
+                              "key": "total",
+                              "label": "Machines",
+                              "align": "right"
+                            },
+                            {
+                              "key": "startedAt",
+                              "label": "Started",
+                              "format": "time"
+                            },
+                            {
+                              "key": "tookLabel",
+                              "label": "Took"
+                            }
+                          ],
+                          "rowKey": "id",
+                          "sortDefault": {
+                            "key": "startedAt",
+                            "dir": "desc"
+                          },
+                          "filterKeys": [
+                            "label",
+                            "state",
+                            "kind"
+                          ],
+                          "groupModes": [
+                            {
+                              "id": "state",
+                              "label": "By result",
+                              "key": "state"
+                            }
+                          ],
+                          "rowDetail": [
+                            {
+                              "type": "section",
+                              "title": "Per machine",
+                              "blocks": [
+                                {
+                                  "type": "table",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "jobItems",
+                                    "args": [
+                                      "$row.id"
+                                    ]
+                                  },
+                                  "columns": [
+                                    {
+                                      "key": "name",
+                                      "label": "Machine"
+                                    },
+                                    {
+                                      "key": "status",
+                                      "label": "Result"
+                                    },
+                                    {
+                                      "key": "message",
+                                      "label": "Detail"
+                                    }
+                                  ],
+                                  "rowKey": "name",
+                                  "emptyText": "No detail was kept for this job."
+                                }
+                              ]
+                            }
+                          ],
+                          "emptyText": "No jobs have run yet."
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [
+                            {
+                              "label": "Clear finished",
+                              "method": "jobsClear",
+                              "confirm": "Remove the finished jobs from this list?"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }

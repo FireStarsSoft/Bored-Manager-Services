@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "id": "generic-apt",
+  "displayName": "Generic apt package service",
+  "kind": "service",
+  "version": "1.0.0",
+  "description": "A shape to copy for something the distribution already packages: install the package, drop a systemd override beside its unit, start it. Nothing is downloaded, so nothing needs a hash - apt has already checked its own signatures.",
+  "fields": [
+    {
+      "id": "package",
+      "label": "Package name",
+      "input": "text",
+      "required": true,
+      "help": "Exactly as apt knows it. This is passed as one argument, so it cannot smuggle a second package or a flag."
+    },
+    {
+      "id": "unit_name",
+      "label": "Unit the package installs",
+      "input": "text",
+      "required": true,
+      "default": "example.service",
+      "help": "Informational only - the unit this template manages is fixed as generic-apt.service, because a template cannot decide at install time which unit it is allowed to touch."
+    },
+    {
+      "id": "extra_environment",
+      "label": "Environment line",
+      "input": "text",
+      "required": false,
+      "default": "",
+      "help": "One KEY=value written into the override."
+    }
+  ],
+  "service": {
+    "units": [
+      {
+        "unit": "generic-apt.service",
+        "primary": true,
+        "install": [
+          {
+            "op": "apt",
+            "argv": [
+              "install",
+              "-y",
+              "{{package}}"
+            ]
+          },
+          {
+            "op": "writeFile",
+            "path": "/etc/systemd/system/generic-apt.service",
+            "mode": "0644",
+            "content": "[Unit]\nDescription=Generic apt-packaged service\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nEnvironment={{extra_environment}}\nExecStart=/usr/bin/env sleep infinity\nRestart=always\nRestartSec=10\nDynamicUser=yes\n\n[Install]\nWantedBy=multi-user.target\n"
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "daemon-reload"
+            ]
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "enable",
+              "--now",
+              "generic-apt.service"
+            ]
+          }
+        ],
+        "uninstall": [
+          {
+            "op": "systemctl",
+            "argv": [
+              "disable",
+              "--now",
+              "generic-apt.service"
+            ],
+            "ignoreErrors": true
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "daemon-reload"
+            ],
+            "ignoreErrors": true
+          }
+        ]
+      }
+    ]
+  },
+  "validate": {
+    "logTail": 80,
+    "failPatterns": []
+  },
+  "redact": []
+}

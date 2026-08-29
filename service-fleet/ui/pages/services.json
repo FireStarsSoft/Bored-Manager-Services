@@ -1,0 +1,638 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "connected"
+        },
+        "op": "eq",
+        "value": false
+      },
+      "blocks": [
+        {
+          "type": "section",
+          "title": "Not connected to a machine",
+          "blocks": [
+            {
+              "type": "note",
+              "title": "This module works through a machine you are connected to",
+              "lines": [
+                "It reaches the rest of your network from there: SSH to find machines and install the agent, then HTTP to everything the agent runs.",
+                "Connect to a machine on the same network as the fleet - the machine list is in the sidebar - and this page fills in by itself."
+              ],
+              "tone": "info"
+            }
+          ]
+        }
+      ],
+      "else": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "problem"
+            },
+            "op": "exists"
+          },
+          "blocks": [
+            {
+              "type": "section",
+              "title": "This machine cannot reach the fleet",
+              "blocks": [
+                {
+                  "type": "keyValue",
+                  "source": {
+                    "kind": "stream",
+                    "event": "capabilities"
+                  },
+                  "rows": [
+                    {
+                      "key": "sshVersion",
+                      "label": "SSH client"
+                    },
+                    {
+                      "key": "problem",
+                      "label": "Problem"
+                    }
+                  ]
+                },
+                {
+                  "type": "note",
+                  "title": "What to do",
+                  "lines": [
+                    "Something the module cannot work without is missing on the machine you are connected to, so nothing has been read and no figure below would be real.",
+                    "Module settings lists every tool it looks for. Install the missing ones there, or connect to a machine that already has them."
+                  ],
+                  "tone": "warning"
+                },
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Check again",
+                      "method": "sweepNow"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "else": [
+            {
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "warning"
+                },
+                "op": "exists"
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Working, with something worth knowing",
+                  "lines": [
+                    "The fleet is being read, and one thing about the machine you are connected to makes it slower or less precise than it could be. Module settings names it."
+                  ],
+                  "tone": "warning"
+                }
+              ]
+            },
+            {
+              "type": "subnav",
+              "items": [
+                {
+                  "id": "instances",
+                  "label": "Deployed",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What a row is",
+                          "lines": [
+                            "One service on one machine. Tick several to act on them together - the toolbar acts on exactly what is ticked.",
+                            "Degraded means the service is working but something optional is not: PacketStream without its watchtower, for instance, is still earning and simply is not updating itself."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Everything deployed",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "instanceRows",
+                            "intervalKey": "service-fleet"
+                          },
+                          "columns": [
+                            {
+                              "key": "ip",
+                              "label": "Machine"
+                            },
+                            {
+                              "key": "label",
+                              "label": "Label"
+                            },
+                            {
+                              "key": "displayName",
+                              "label": "Service"
+                            },
+                            {
+                              "key": "template",
+                              "label": "Template id"
+                            },
+                            {
+                              "key": "kind",
+                              "label": "Kind"
+                            },
+                            {
+                              "key": "stateBadges",
+                              "label": "State",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "state",
+                              "label": "State name"
+                            },
+                            {
+                              "key": "unitBadges",
+                              "label": "Units",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "restarts",
+                              "label": "Restarts",
+                              "align": "right"
+                            },
+                            {
+                              "key": "updatedAt",
+                              "label": "Changed",
+                              "format": "time"
+                            }
+                          ],
+                          "rowKey": "key",
+                          "selectable": true,
+                          "sortDefault": {
+                            "key": "ip",
+                            "dir": "asc"
+                          },
+                          "filterKeys": [
+                            "ip",
+                            "label",
+                            "template",
+                            "displayName",
+                            "state"
+                          ],
+                          "groupModes": [
+                            {
+                              "id": "machine",
+                              "label": "By machine",
+                              "key": "ip"
+                            },
+                            {
+                              "id": "template",
+                              "label": "By service",
+                              "key": "template"
+                            },
+                            {
+                              "id": "state",
+                              "label": "By state",
+                              "key": "state"
+                            }
+                          ],
+                          "rowActions": [
+                            {
+                              "label": "Restart",
+                              "method": "instanceAction",
+                              "argsFromRow": [
+                                "key"
+                              ],
+                              "args": [
+                                "restart"
+                              ]
+                            },
+                            {
+                              "label": "Validate",
+                              "method": "instanceAction",
+                              "argsFromRow": [
+                                "key"
+                              ],
+                              "args": [
+                                "validate"
+                              ]
+                            }
+                          ],
+                          "bulkActions": [
+                            {
+                              "label": "Start",
+                              "method": "bulkInstanceAction",
+                              "args": [
+                                "start"
+                              ]
+                            },
+                            {
+                              "label": "Restart",
+                              "method": "bulkInstanceAction",
+                              "args": [
+                                "restart"
+                              ]
+                            },
+                            {
+                              "label": "Validate",
+                              "method": "bulkInstanceAction",
+                              "args": [
+                                "validate"
+                              ]
+                            },
+                            {
+                              "label": "Stop",
+                              "method": "bulkInstanceAction",
+                              "args": [
+                                "stop"
+                              ],
+                              "confirm": "Stop the ticked services? They stop earning until they are started again.",
+                              "kind": "danger"
+                            },
+                            {
+                              "label": "Uninstall",
+                              "method": "bulkInstanceAction",
+                              "args": [
+                                "uninstall"
+                              ],
+                              "confirm": "Remove the ticked services from their machines? Stored credentials are kept unless you remove the agent too.",
+                              "kind": "danger"
+                            }
+                          ],
+                          "rowDetail": [
+                            {
+                              "type": "section",
+                              "title": "This service",
+                              "blocks": [
+                                {
+                                  "type": "actions",
+                                  "actions": [
+                                    {
+                                      "label": "Start",
+                                      "method": "instanceAction",
+                                      "argsFromRow": [
+                                        "key"
+                                      ],
+                                      "args": [
+                                        "start"
+                                      ]
+                                    },
+                                    {
+                                      "label": "Restart",
+                                      "method": "instanceAction",
+                                      "argsFromRow": [
+                                        "key"
+                                      ],
+                                      "args": [
+                                        "restart"
+                                      ]
+                                    },
+                                    {
+                                      "label": "Validate",
+                                      "method": "instanceAction",
+                                      "argsFromRow": [
+                                        "key"
+                                      ],
+                                      "args": [
+                                        "validate"
+                                      ]
+                                    },
+                                    {
+                                      "label": "Stop",
+                                      "method": "instanceAction",
+                                      "argsFromRow": [
+                                        "key"
+                                      ],
+                                      "args": [
+                                        "stop"
+                                      ],
+                                      "confirm": "Stop this service?",
+                                      "kind": "danger"
+                                    },
+                                    {
+                                      "label": "Uninstall",
+                                      "method": "instanceAction",
+                                      "argsFromRow": [
+                                        "key"
+                                      ],
+                                      "args": [
+                                        "uninstall"
+                                      ],
+                                      "confirm": "Remove this service from the machine?",
+                                      "kind": "danger"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "section",
+                              "title": "Recent log",
+                              "blocks": [
+                                {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "ui",
+                                      "path": "hintsOn"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "Where this comes from",
+                                      "lines": [
+                                        "The agent reads it from Docker or the journal and masks anything that looks like a secret before it leaves the machine. It is a snapshot, not a live tail."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "keyValue",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "instanceLogs",
+                                    "args": [
+                                      "$row.key"
+                                    ]
+                                  },
+                                  "rows": [
+                                    {
+                                      "key": "unit",
+                                      "label": "Unit"
+                                    },
+                                    {
+                                      "key": "error",
+                                      "label": "Problem"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "list",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "instanceLogs",
+                                    "args": [
+                                      "$row.key"
+                                    ],
+                                    "path": "lines"
+                                  },
+                                  "columns": [
+                                    {
+                                      "key": "line"
+                                    }
+                                  ],
+                                  "limit": 200,
+                                  "emptyText": "Nothing in the log yet, or the agent could not be reached."
+                                }
+                              ]
+                            }
+                          ],
+                          "emptyText": "Nothing is deployed anywhere yet. Use Deploy to put a service on some machines."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "deploy",
+                  "label": "Deploy",
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "How deploying works",
+                      "lines": [
+                        "A template is pushed to each machine you choose, and then installed from. Pushing happens every time, so editing a template and deploying again is how a change reaches the fleet.",
+                        "A machine already running this service is reinstalled rather than given a second copy."
+                      ],
+                      "tone": "info"
+                    },
+                    {
+                      "type": "section",
+                      "title": "Deploy a service",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "What each field means",
+                              "lines": [
+                                "Service - which template to deploy. Templates that ship with the module and ones you wrote are both here.",
+                                "Machines - which agents to put it on. Only machines with a working agent token are offered.",
+                                "The remaining fields are whatever that template asks for - an account email, a password, a device name. They are checked before anything is sent, and secret ones are stored on each machine unencrypted, which the check step says again before you apply."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "checkForm",
+                          "checkMethod": "deployCheck",
+                          "applyMethod": "deployApply",
+                          "fields": [
+                            {
+                              "key": "template",
+                              "label": "Service",
+                              "input": "select",
+                              "optionsFrom": {
+                                "kind": "invoke",
+                                "method": "selectOptions",
+                                "args": [
+                                  "templates"
+                                ]
+                              }
+                            },
+                            {
+                              "key": "machines",
+                              "label": "Machines",
+                              "input": "select",
+                              "multiple": true,
+                              "optionsFrom": {
+                                "kind": "invoke",
+                                "method": "agentOptions"
+                              }
+                            },
+                            {
+                              "key": "field_email",
+                              "label": "Account email",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_password",
+                              "label": "Password",
+                              "input": "password",
+                              "omitOnApply": true
+                            },
+                            {
+                              "key": "field_device",
+                              "label": "Device name",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_device_name",
+                              "label": "Device name (Pawns)",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_device_id",
+                              "label": "Device id (Pawns)",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_cid",
+                              "label": "CID (PacketStream)",
+                              "input": "password",
+                              "omitOnApply": true
+                            },
+                            {
+                              "key": "field_binary_url",
+                              "label": "Download URL (native templates)",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_binary_sha256",
+                              "label": "SHA-256 of that file",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_package",
+                              "label": "Package name (apt template)",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_arguments",
+                              "label": "Arguments",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_extra_environment",
+                              "label": "Environment line",
+                              "input": "text"
+                            },
+                            {
+                              "key": "field_unit_name",
+                              "label": "Unit the package installs",
+                              "input": "text"
+                            }
+                          ],
+                          "checkLabel": "Check the plan",
+                          "applyLabel": "Deploy"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Which fields this service uses",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "Why every field is shown",
+                              "lines": [
+                                "A form is fixed JSON, and which values a template needs is not known until one is chosen - so every field any shipped template asks for is listed above, and the ones your chosen template does not use are ignored.",
+                                "This table is the authority: it lists exactly what the selected service asks for, whether each is required, and which are stored as secrets."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "templateFields",
+                            "args": [
+                              "$form.template"
+                            ]
+                          },
+                          "columns": [
+                            {
+                              "key": "label",
+                              "label": "Field"
+                            },
+                            {
+                              "key": "key",
+                              "label": "Fill in"
+                            },
+                            {
+                              "key": "required",
+                              "label": "Required"
+                            },
+                            {
+                              "key": "secret",
+                              "label": "Secret"
+                            },
+                            {
+                              "key": "default",
+                              "label": "Default"
+                            },
+                            {
+                              "key": "help",
+                              "label": "What it is"
+                            }
+                          ],
+                          "rowKey": "key",
+                          "emptyText": "Choose a service above to see what it asks for."
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

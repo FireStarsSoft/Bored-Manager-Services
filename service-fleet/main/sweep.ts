@@ -1,10 +1,20 @@
 /**
  * The one thing that touches the network on a timer: ask every configured
- * address what it is running, fold the answers into the roster, and publish what
- * the pages read.
+ * address who it is, ask every agent what it is running, fold both into the
+ * roster, and publish what the pages read.
+ *
+ * Two passes, and the split is the point:
+ *
+ * 1. **SSH** to every configured address. This is what finds machines, and the
+ *    only thing that can tell "nothing is at .137" from "a machine is there and
+ *    refuses the login". It is expensive, which is why it now carries a tiny
+ *    payload instead of a unit list.
+ * 2. **HTTP** to the addresses that answered, through curl on the jump host.
+ *    Everything an installed agent knows comes back this way, at a fraction of
+ *    the cost of a second SSH session.
  *
  * It runs on the **slow** interval, not the fast one. A fan-out over a subnet
- * takes seconds and shares one SSH connection with the app's own collectors, so
+ * takes seconds and shares one connection with the app's own collectors, so
  * "every two minutes" is the honest cadence; the fast interval is only how often
  * the browser re-reads the result this already computed.
  */
@@ -15,7 +25,9 @@ import { enumerateRule } from './net'
 import type { JumpCapabilities } from './probe'
 import type { Roster, HostsPayload } from './roster'
 import type { FleetRules } from './rules'
-import { parseSweep, sweepCompleted, sweepPayload, type HostFacts } from './units'
+import { detectAgents, type AgentTarget } from './agent/detect'
+import type { AgentInfo } from './agent/types'
+import { HOST_PROBE_SCRIPT, parseHostProbe, probeCompleted } from './hostprobe'
 
 export interface SweepStatus {
   t: number
@@ -30,9 +42,10 @@ export interface SweepStatus {
 
 export interface SeriesPoint {
   t: number
-  online: number
-  offline: number
-  degraded: number
+  ready: number
+  noAgent: number
+  unreachable: number
+  running: number
   failed: number
 }
 
@@ -171,13 +184,42 @@ export class Sweeper {
     const rules = this.deps.rules()
     const cred = resolveCredential(ip, config.targets)
     if (!cred) return
-    const results = await runFanout(this.ctx, [{ ip, cred }], sweepPayload(config.watched, rules), rules)
+    const results = await runFanout(this.ctx, [{ ip, cred }], HOST_PROBE_SCRIPT, rules)
     const result = results[0]
     if (!result) return
     const reach = classifyReach(result)
-    const facts = reach === 'ok' && sweepCompleted(result.stdout) ? parseSweep(result.stdout, rules.maxUnitsPerHost) : null
-    this.roster.applyOne({ ip, cred, reach, reachMessage: reachMessage(reach, result), facts }, config.watched, rules)
+    const complete = reach === 'ok' && probeCompleted(result.stdout)
+    let agent: AgentInfo | null = null
+    if (complete) {
+      const found = await this.detect([{ ip, port: rules.agentPort, token: this.roster.tokenFor(ip) }], rules)
+      agent = found.get(ip) ?? null
+    }
+    this.roster.applyOne(
+      {
+        ip,
+        cred,
+        reach,
+        reachMessage: reachMessage(reach, result),
+        facts: complete ? parseHostProbe(result.stdout) : null,
+        agent
+      },
+      rules
+    )
     this.publishCards(rules)
+  }
+
+  /**
+   * Ask a batch of addresses about their agent, and remember what came back.
+   *
+   * Kept here rather than inline so `sweep` and `refreshOne` cannot drift on
+   * what "detecting an agent" means - they used to, when a single-machine probe
+   * and a sweep each built their own payload.
+   */
+  private async detect(
+    targets: readonly AgentTarget[],
+    rules: FleetRules
+  ): Promise<Map<string, AgentInfo>> {
+    return detectAgents(this.ctx, targets, rules, this.abortController?.signal)
   }
 
   private setStatus(patch: Partial<SweepStatus>): void {
@@ -208,10 +250,11 @@ export class Sweeper {
     const payload = this.publishCards(rules)
     const point: SeriesPoint = {
       t: payload.t,
-      online: payload.counts.online,
-      offline: payload.counts.offline,
-      degraded: payload.counts.degraded,
-      failed: payload.counts.unitsFailed
+      ready: payload.counts.ready,
+      noAgent: payload.counts.noAgent,
+      unreachable: payload.counts.unreachable,
+      running: payload.counts.instancesRunning,
+      failed: payload.counts.instancesFailed
     }
     this.series.push(point)
     const cutoff = point.t - SERIES_MS
@@ -220,11 +263,13 @@ export class Sweeper {
     this.ctx.emit('series', point)
     this.ctx.addHistory({
       t: point.t,
-      online: point.online,
-      offline: point.offline,
-      degraded: point.degraded,
-      unitsRunning: payload.counts.unitsRunning,
-      unitsFailed: payload.counts.unitsFailed
+      ready: point.ready,
+      noAgent: point.noAgent,
+      unreachable: point.unreachable,
+      running: point.running,
+      degraded: payload.counts.instancesDegraded,
+      failed: point.failed,
+      offline: payload.counts.hostsOffline
     })
   }
 
@@ -239,7 +284,7 @@ export class Sweeper {
     }
     const plan = planTargets(config, rules)
     if (plan.targets.length === 0) {
-      this.roster.apply([], config.watched, rules)
+      this.roster.apply([], rules)
       this.publish(rules)
       this.setStatus({
         state: 'idle',
@@ -262,10 +307,9 @@ export class Sweeper {
       message: `Sweeping ${plan.targets.length} addresses…`
     })
 
-    const payload = sweepPayload(config.watched, rules)
     let results
     try {
-      results = await runFanout(this.ctx, plan.targets, payload, rules, {
+      results = await runFanout(this.ctx, plan.targets, HOST_PROBE_SCRIPT, rules, {
         onProgress: (done, total) => this.setStatus({ done, total }),
         cancelled: () => this.cancelRequested,
         signal: this.abortController.signal
@@ -290,22 +334,56 @@ export class Sweeper {
     if (this.stopped) return
 
     const byIp = new Map(plan.targets.map((target) => [target.ip, target]))
+    const reachable: AgentTarget[] = []
+    const partial = new Map<
+      string,
+      { reach: ReturnType<typeof classifyReach>; message: string; facts: ReturnType<typeof parseHostProbe> | null }
+    >()
+    for (const result of results) {
+      const reach = classifyReach(result)
+      const complete = reach === 'ok' && probeCompleted(result.stdout)
+      partial.set(result.ip, {
+        reach,
+        message: reachMessage(reach, result),
+        facts: complete ? parseHostProbe(result.stdout) : null
+      })
+      // A truncated answer - the connection dropped mid-script - is not a
+      // machine that answered. Reading it as one would put a blank hostname
+      // into the roster and claim the address was fine.
+      if (complete) {
+        reachable.push({
+          ip: result.ip,
+          port: rules.agentPort,
+          token: this.roster.tokenFor(result.ip)
+        })
+      }
+    }
+
+    // Second pass, over HTTP, only for what answered. A cancelled sweep skips
+    // it: the user asked for it to stop, and this is the expensive half.
+    let agents = new Map<string, AgentInfo>()
+    if (reachable.length && !this.cancelRequested && !this.stopped) {
+      this.setStatus({ message: `Asking ${reachable.length} agents…` })
+      try {
+        agents = await this.detect(reachable, rules)
+      } catch {
+        // An agent pass that failed wholesale must not lose the SSH pass that
+        // succeeded: the roster still learns which addresses are machines.
+        agents = new Map()
+      }
+    }
+    if (this.stopped) return
+
     const entries = results.map((result) => {
       const target = byIp.get(result.ip)
-      const reach = classifyReach(result)
-      let facts: HostFacts | null = null
-      if (reach === 'ok') {
-        facts = parseSweep(result.stdout, rules.maxUnitsPerHost)
-        // A truncated answer (the connection dropped mid-script) would otherwise
-        // read as "this machine runs no services at all".
-        if (!sweepCompleted(result.stdout)) facts = null
-      }
+      const seen = partial.get(result.ip)
       return {
         ip: result.ip,
         cred: target?.cred ?? plan.targets[0].cred,
-        reach,
-        reachMessage: reachMessage(reach, result),
-        facts
+        reach: seen?.reach ?? 'error',
+        reachMessage: seen?.message ?? 'no answer',
+        facts: seen?.facts ?? null,
+        agent: agents.get(result.ip) ?? null
       }
     })
 
@@ -313,7 +391,7 @@ export class Sweeper {
     // it as a full sweep would read as "every address not yet reached this
     // round is no longer configured" and drop it from the wall, the Services
     // table and bulk targeting until the next full sweep completes.
-    this.roster.apply(entries, config.watched, rules, { partial: this.cancelRequested })
+    this.roster.apply(entries, rules, { partial: this.cancelRequested })
     this.publish(rules)
     const reached = entries.filter((entry) => entry.reach === 'ok').length
     const durationMs = Date.now() - startedAt

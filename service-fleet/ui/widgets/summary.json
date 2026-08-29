@@ -1,19 +1,85 @@
 {
   "blocks": [
     {
-      "type": "section",
-      "title": "Service fleet",
+      "type": "conditional",
+      "when": {
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "connected"
+        },
+        "op": "eq",
+        "value": false
+      },
       "blocks": [
         {
+          "type": "note",
+          "title": "Not connected",
+          "lines": [
+            "Connect to a machine on the fleet's network to see it here."
+          ]
+        }
+      ],
+      "else": [
+        {
           "type": "pie",
-          "source": { "kind": "stream", "event": "hosts", "path": "counts" },
-          "center": { "key": "total", "label": "Machines" },
-          "emptyText": "No machines watched yet",
+          "source": {
+            "kind": "stream",
+            "event": "fleet",
+            "path": "counts"
+          },
           "slices": [
-            { "key": "online", "label": "Normal", "status": "ok" },
-            { "key": "degraded", "label": "Warning", "status": "warn" },
-            { "key": "offline", "label": "Error", "status": "bad" },
-            { "key": "unknown", "label": "Unknown", "status": "unknown" }
+            {
+              "key": "ready",
+              "label": "Agent ready",
+              "status": "ok"
+            },
+            {
+              "key": "noAgent",
+              "label": "No agent",
+              "status": "warn"
+            },
+            {
+              "key": "unreachable",
+              "label": "Unreachable",
+              "status": "bad"
+            },
+            {
+              "key": "unknown",
+              "label": "Not checked",
+              "status": "unknown"
+            }
+          ],
+          "center": {
+            "key": "total",
+            "label": "Machines"
+          },
+          "emptyText": "No machines yet - add an address range in Module settings."
+        },
+        {
+          "type": "keyValue",
+          "source": {
+            "kind": "stream",
+            "event": "fleet",
+            "path": "counts"
+          },
+          "rows": [
+            {
+              "key": "instancesRunning",
+              "label": "Services running"
+            },
+            {
+              "key": "instancesDegraded",
+              "label": "Degraded"
+            },
+            {
+              "key": "instancesFailed",
+              "label": "Failed"
+            },
+            {
+              "key": "hostsOffline",
+              "label": "Machines with no internet"
+            }
           ]
         }
       ]

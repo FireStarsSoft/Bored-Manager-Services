@@ -1,0 +1,464 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "connected"
+        },
+        "op": "eq",
+        "value": false
+      },
+      "blocks": [
+        {
+          "type": "section",
+          "title": "Not connected to a machine",
+          "blocks": [
+            {
+              "type": "note",
+              "title": "This module works through a machine you are connected to",
+              "lines": [
+                "It reaches the rest of your network from there: SSH to find machines and install the agent, then HTTP to everything the agent runs.",
+                "Connect to a machine on the same network as the fleet - the machine list is in the sidebar - and this page fills in by itself."
+              ],
+              "tone": "info"
+            }
+          ]
+        }
+      ],
+      "else": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "problem"
+            },
+            "op": "exists"
+          },
+          "blocks": [
+            {
+              "type": "section",
+              "title": "This machine cannot reach the fleet",
+              "blocks": [
+                {
+                  "type": "keyValue",
+                  "source": {
+                    "kind": "stream",
+                    "event": "capabilities"
+                  },
+                  "rows": [
+                    {
+                      "key": "sshVersion",
+                      "label": "SSH client"
+                    },
+                    {
+                      "key": "problem",
+                      "label": "Problem"
+                    }
+                  ]
+                },
+                {
+                  "type": "note",
+                  "title": "What to do",
+                  "lines": [
+                    "Something the module cannot work without is missing on the machine you are connected to, so nothing has been read and no figure below would be real.",
+                    "Module settings lists every tool it looks for. Install the missing ones there, or connect to a machine that already has them."
+                  ],
+                  "tone": "warning"
+                },
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Check again",
+                      "method": "sweepNow"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "else": [
+            {
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "warning"
+                },
+                "op": "exists"
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Working, with something worth knowing",
+                  "lines": [
+                    "The fleet is being read, and one thing about the machine you are connected to makes it slower or less precise than it could be. Module settings names it."
+                  ],
+                  "tone": "warning"
+                }
+              ]
+            },
+            {
+              "type": "subnav",
+              "items": [
+                {
+                  "id": "library",
+                  "label": "Library",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What a template is",
+                          "lines": [
+                            "A JSON document describing one service: which containers or units it owns, and which values it needs from you. The agent runs it from a fixed list of operations - it can never contain a shell command - which is what makes it safe to write one and push it to fifty machines.",
+                            "Six ship with the module and cannot be edited in place. To change one, export it, edit it and import it back under the same id: the library then shows it as yours."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Templates",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "templateRows",
+                            "intervalKey": "service-fleet"
+                          },
+                          "columns": [
+                            {
+                              "key": "id",
+                              "label": "Id"
+                            },
+                            {
+                              "key": "name",
+                              "label": "Name"
+                            },
+                            {
+                              "key": "kind",
+                              "label": "Kind"
+                            },
+                            {
+                              "key": "version",
+                              "label": "Version"
+                            },
+                            {
+                              "key": "originLabel",
+                              "label": "Origin"
+                            },
+                            {
+                              "key": "units",
+                              "label": "Units"
+                            },
+                            {
+                              "key": "fields",
+                              "label": "Fields",
+                              "align": "right"
+                            },
+                            {
+                              "key": "updatedAt",
+                              "label": "Changed",
+                              "format": "time"
+                            }
+                          ],
+                          "rowKey": "id",
+                          "sortDefault": {
+                            "key": "id",
+                            "dir": "asc"
+                          },
+                          "filterKeys": [
+                            "id",
+                            "name",
+                            "kind",
+                            "originLabel",
+                            "units"
+                          ],
+                          "groupModes": [
+                            {
+                              "id": "origin",
+                              "label": "By origin",
+                              "key": "originLabel"
+                            },
+                            {
+                              "id": "kind",
+                              "label": "By kind",
+                              "key": "kind"
+                            }
+                          ],
+                          "rowActions": [
+                            {
+                              "label": "Delete",
+                              "method": "templateDelete",
+                              "argsFromRow": [
+                                "id"
+                              ],
+                              "confirm": "Remove this template from the library? Anything already deployed from it keeps running.",
+                              "kind": "danger"
+                            }
+                          ],
+                          "rowDetail": [
+                            {
+                              "type": "section",
+                              "title": "What it does",
+                              "blocks": [
+                                {
+                                  "type": "keyValue",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "templateDetail",
+                                    "args": [
+                                      "$row.id"
+                                    ]
+                                  },
+                                  "rows": [
+                                    {
+                                      "key": "name",
+                                      "label": "Name"
+                                    },
+                                    {
+                                      "key": "kind",
+                                      "label": "Kind"
+                                    },
+                                    {
+                                      "key": "version",
+                                      "label": "Version"
+                                    },
+                                    {
+                                      "key": "origin",
+                                      "label": "Origin"
+                                    },
+                                    {
+                                      "key": "description",
+                                      "label": "Description"
+                                    },
+                                    {
+                                      "key": "units",
+                                      "label": "Units"
+                                    },
+                                    {
+                                      "key": "privileged",
+                                      "label": "Runs a shell as root"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "section",
+                              "title": "Fields it asks for",
+                              "blocks": [
+                                {
+                                  "type": "table",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "templateFields",
+                                    "args": [
+                                      "$row.id"
+                                    ]
+                                  },
+                                  "columns": [
+                                    {
+                                      "key": "label",
+                                      "label": "Field"
+                                    },
+                                    {
+                                      "key": "input",
+                                      "label": "Kind"
+                                    },
+                                    {
+                                      "key": "required",
+                                      "label": "Required"
+                                    },
+                                    {
+                                      "key": "secret",
+                                      "label": "Secret"
+                                    },
+                                    {
+                                      "key": "help",
+                                      "label": "What it is"
+                                    }
+                                  ],
+                                  "rowKey": "id",
+                                  "emptyText": "This template needs nothing filled in."
+                                }
+                              ]
+                            },
+                            {
+                              "type": "section",
+                              "title": "Export",
+                              "blocks": [
+                                {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "ui",
+                                      "path": "hintsOn"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "How to copy one",
+                                      "lines": [
+                                        "Below is this template exactly as it is stored. Copy it, change what you need, and paste it into Import - the id inside decides which template it replaces."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "list",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "templateExport",
+                                    "args": [
+                                      "$row.id"
+                                    ],
+                                    "path": "lines"
+                                  },
+                                  "columns": [
+                                    {
+                                      "key": "line"
+                                    }
+                                  ],
+                                  "limit": 400,
+                                  "emptyText": "This template could not be read back."
+                                }
+                              ]
+                            }
+                          ],
+                          "emptyText": "No templates loaded. That should not happen - six ship with the module, so this means they could not be read."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "import",
+                  "label": "Import",
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "What the check step does",
+                      "lines": [
+                        "It parses the JSON, then validates it against the same rules the agent enforces - the operation list, the directories a template may write to, the requirement that every download carries a SHA-256.",
+                        "It reports everything wrong at once rather than one thing per attempt, and nothing is stored until it passes."
+                      ],
+                      "tone": "info"
+                    },
+                    {
+                      "type": "section",
+                      "title": "Import a template",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "What each field means",
+                              "lines": [
+                                "Choose a file - a .json file exported from here or written by hand.",
+                                "Or paste it - the same thing, for when copying text is easier than moving a file. Whichever of the two is filled in is used; the file wins if both are.",
+                                "The id inside the document decides what it is called. Importing one whose id matches an existing template replaces it."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "checkForm",
+                          "checkMethod": "templateImportCheck",
+                          "applyMethod": "templateImportApply",
+                          "fields": [
+                            {
+                              "key": "file",
+                              "label": "Choose a file",
+                              "input": "file",
+                              "accept": ".json",
+                              "maxKb": 512
+                            },
+                            {
+                              "key": "document",
+                              "label": "Or paste it here",
+                              "input": "textarea",
+                              "placeholder": "{ \"id\": \"my-service\", \"displayName\": \"My service\", ... }"
+                            }
+                          ],
+                          "checkLabel": "Check it",
+                          "applyLabel": "Save to the library"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Writing one",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "The rules a template has to follow",
+                              "lines": [
+                                "kind is \"container\" for Docker or \"service\" for a systemd unit. Exactly one unit has to be marked primary - it decides the instance's state and is whose log you get by default.",
+                                "fields are what the user fills in. Mark anything sensitive secret: it is then masked in logs and never returned by the agent's API.",
+                                "Values reach a command through {{field}}, and each one always becomes exactly one argument - a password containing a space or a semicolon cannot turn into two arguments.",
+                                "A download must carry a sha256. It may come from a field, so a generic template can ask the operator for both - but it can never be absent.",
+                                "writeFile and mkdir are limited to /etc/systemd/system, /opt, /usr/local/bin and the module's own directories.",
+                                "There is no way to write a shell command, except the script operation - and that needs \"privileged\": true, which this app warns about loudly before deploying."
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

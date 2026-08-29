@@ -1,0 +1,121 @@
+# BoredAgent configuration.
+#
+# `agent-install.sh` copies this to /etc/boredagent/config.toml on a first
+# install and NEVER overwrites it afterwards, so anything you change here
+# survives an upgrade. Every key has a default in code as well, which is why a
+# file written by an older version keeps working when new keys appear.
+
+# Bind address. 0.0.0.0 so other machines on the LAN can reach it - which is the
+# point of the agent, and the reason the token is not optional. Put a firewall
+# rule in front of it:
+#   sudo ufw allow from 192.168.0.0/16 to any port 8741 proto tcp
+bind = "0.0.0.0"
+port = 8741
+
+token_file = "/etc/boredagent/token"
+state_dir = "/var/lib/boredagent"
+
+# CORS. "*" with a bearer token is convenient for a browser-based manager on the
+# LAN and is a smaller risk than cookies would be, because a token is not sent
+# automatically by the browser. It is still worth narrowing if you know the
+# origin your manager runs on.
+cors_origins = ["*"]
+
+[docker]
+socket = "unix:///var/run/docker.sock"
+
+[logs]
+# Ceiling on `tail`. A client asking for more gets this many.
+max_tail = 5000
+# Mask secrets in every log line before it leaves the process. Turning this off
+# means a stored password can appear in an API response.
+redact = true
+
+[net]
+# One probe per tick, per loop. Two loops - reachability and public address -
+# run independently, so each pool rotates once every len(pool) seconds.
+interval_s = 1
+ping_timeout_s = 1
+
+# How many recent samples decide online/offline. The rule is asymmetric on
+# purpose: a majority makes it online, but the WHOLE window has to fail before
+# it is offline - so one operator blocking ICMP does not read as an outage.
+offline_window = 5
+
+# Ring buffer per kind, in samples. 300 at one second is five minutes, which is
+# what /v1/net/history can serve. Longer horizons come from telemetry.
+history_size = 300
+
+# Least time between HTTP fallbacks, used only when an entire DNS round failed.
+http_ip_fallback_s = 15
+
+# Four operators, so no single one's outage looks like the internet's.
+ping_targets = [
+  "1.1.1.1",          # Cloudflare
+  "1.0.0.1",          # Cloudflare
+  "8.8.8.8",          # Google
+  "8.8.4.4",          # Google
+  "9.9.9.9",          # Quad9
+  "208.67.222.222",   # OpenDNS
+  "149.112.112.112",  # Quad9 secondary
+]
+
+# "What is my address" sources, asked one per tick in this order.
+# Cloudflare is deliberately absent: it is in the ping pool above, and a source
+# answering both questions would let one operator's outage look like two
+# independent failures agreeing with each other.
+[[net.ip_sources]]
+name = "google_ns1"
+args = ["txt", "o-o.myaddr.l.google.com", "@216.239.32.10"]
+
+[[net.ip_sources]]
+name = "google_ns2"
+args = ["txt", "o-o.myaddr.l.google.com", "@216.239.34.10"]
+
+[[net.ip_sources]]
+name = "google_ns3"
+args = ["txt", "o-o.myaddr.l.google.com", "@216.239.36.10"]
+
+[[net.ip_sources]]
+name = "google_ns4"
+args = ["txt", "o-o.myaddr.l.google.com", "@216.239.38.10"]
+
+[[net.ip_sources]]
+name = "opendns_1"
+args = ["myip.opendns.com", "@208.67.222.222"]
+
+[[net.ip_sources]]
+name = "opendns_2"
+args = ["myip.opendns.com", "@208.67.220.220"]
+
+[[net.ip_sources]]
+name = "akamai"
+args = ["whoami.akamai.net", "@193.108.91.2"]
+
+[telemetry]
+enabled = true
+
+# How often byte counters are read. Once a minute is cheap: it is a one-shot
+# stats call per container, not a streaming `docker stats` connection held open.
+sample_s = 60
+
+# Raw per-sample rows, for working out why a rollup looks odd.
+raw_days = 7
+
+# Daily rows. Roughly 200 bytes each, so a year of them is nothing - and keeping
+# them here is what lets a fleet manager that was switched off for a week
+# backfill the days it missed rather than losing them.
+daily_days = 400
+
+# Minutes from UTC for the day boundary, so "yesterday's total" means the
+# operator's yesterday. 420 = UTC+7.
+day_offset_min = 0
+
+# A latency episode opens when RTT exceeds the rolling median times this...
+spike_factor = 3.0
+# ...or this many milliseconds, whichever is larger. The floor is what stops a
+# 2ms LAN reporting a spike every time a packet takes 7ms.
+spike_floor_ms = 150.0
+# Consecutive samples over the threshold before an episode is recorded, so one
+# slow packet is not an incident.
+spike_samples = 3

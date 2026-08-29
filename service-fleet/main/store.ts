@@ -8,9 +8,12 @@
  * at a different jump host and the same subnet may be a different set of
  * machines, or none at all. What the user typed lives in `config.ts`.
  *
- * Live unit lists are **not** in here. They are in memory only: 254 machines
- * with 30 services each would be past the 512 KB cap on the first write, and a
- * service state from ten minutes ago is worse than no service state.
+ * Live instance lists are **not** in here. They are in memory only: 254
+ * machines with several instances each would be past the storage grant on the
+ * first write, and an instance state from ten minutes ago is worse than no
+ * instance state.
+ *
+ * Agent tokens *are* in here, in clear text - see `HostRecord.agentToken`.
  */
 import type { ModuleContext } from '@shared/modules'
 import { ipToInt } from './net'
@@ -46,6 +49,30 @@ export interface HostRecord {
    * the difference between "this machine is down" and "nothing lives at .137".
    */
   pinned: boolean
+
+  /**
+   * The agent's bearer token, as the installer printed it.
+   *
+   * **Clear text**, like the SSH passwords in `config.ts`. `ctx` offers no
+   * encryption and the app's own helper is server-private, so the honest thing
+   * is to say so here, in the settings page and in the README rather than to
+   * imply otherwise. It is per machine, which is why it lives in host data
+   * rather than in the shared config.
+   */
+  agentToken?: string
+  /** What the last detection said. See agent/types.ts for what each word means. */
+  agentState?: string
+  agentVersion?: string
+  agentCheckedAt?: number | null
+  /**
+   * Newest telemetry timestamp already pulled from this machine, so the next
+   * pull asks for what came after it.
+   *
+   * Kept per machine and advanced only on a successful append. An agent holds
+   * over a year of daily rows, so a module that was switched off for a week
+   * backfills the gap from this cursor rather than losing those days.
+   */
+  telemetryCursor?: number | null
 }
 
 export type JobItemStatus = 'pending' | 'running' | 'ok' | 'error' | 'skipped' | 'cancelled'
@@ -134,7 +161,12 @@ function normalize(raw: unknown): FleetHostData {
       lastProbeAt: asNumberOrNull(h.lastProbeAt),
       reach: REACH_VALUES.includes(h.reach as Reachability) ? (h.reach as Reachability) : 'unknown',
       reachNote: asString(h.reachNote),
-      pinned: h.pinned === true
+      pinned: h.pinned === true,
+      agentToken: asString(h.agentToken) || undefined,
+      agentState: asString(h.agentState) || undefined,
+      agentVersion: asString(h.agentVersion) || undefined,
+      agentCheckedAt: asNumberOrNull(h.agentCheckedAt),
+      telemetryCursor: asNumberOrNull(h.telemetryCursor)
     }
   }
   const jobs = (Array.isArray(r.jobs) ? r.jobs : []).filter(

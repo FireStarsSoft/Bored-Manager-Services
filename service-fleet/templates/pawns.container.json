@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "id": "pawns",
+  "displayName": "Pawns.app (IPRoyal)",
+  "kind": "container",
+  "version": "1.0.0",
+  "description": "The IPRoyal Pawns CLI in its official container. A different buyer from Honeygain, so the two can run on one machine without competing for the same demand.",
+  "fields": [
+    {
+      "id": "email",
+      "label": "Account email",
+      "input": "text",
+      "required": true
+    },
+    {
+      "id": "password",
+      "label": "Password",
+      "input": "password",
+      "required": true,
+      "secret": true
+    },
+    {
+      "id": "device_name",
+      "label": "Device name",
+      "input": "text",
+      "required": false,
+      "default": "Ubuntu"
+    },
+    {
+      "id": "device_id",
+      "label": "Device id",
+      "input": "text",
+      "required": false,
+      "default": "Ubuntu01",
+      "help": "Has to be unique across your Pawns devices. Two machines sharing one id look like a single device that keeps moving."
+    }
+  ],
+  "container": {
+    "units": [
+      {
+        "name": "pawnsapp",
+        "image": "iproyal/pawns-cli:latest",
+        "primary": true,
+        "restart": "unless-stopped",
+        "pull": true,
+        "args": [
+          "-email={{email}}",
+          "-password={{password}}",
+          "-device-name={{device_name}}",
+          "-device-id={{device_id}}",
+          "-accept-tos"
+        ],
+        "preInstall": [
+          {
+            "op": "dockerRm",
+            "target": "pawnsapp",
+            "force": true,
+            "ignoreErrors": true
+          }
+        ]
+      }
+    ]
+  },
+  "validate": {
+    "logTail": 80,
+    "failPatterns": [
+      "invalid credentials",
+      "authentication failed",
+      "unauthorized"
+    ]
+  },
+  "redact": [
+    "password"
+  ]
+}

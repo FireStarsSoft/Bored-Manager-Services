@@ -6,10 +6,11 @@
  * user maintains - it should not change just because the app was pointed at a
  * different jump host, and it has to survive reinstalling the module.
  *
- * The passwords in here are stored **in clear text**. `ctx` offers no
- * encryption, the app's own AES helper is server-private, and pretending
- * otherwise would be worse than saying so: the settings page and the README
- * both say it, and SSH keys are the recommended way in.
+ * The passwords in here are stored **in clear text**, and so are the agent
+ * tokens in `store.ts`. `ctx` offers no encryption, the app's own AES helper is
+ * server-private, and pretending otherwise would be worse than saying so: the
+ * settings page and the README both say it, and SSH keys are the recommended
+ * way in.
  */
 import type { ModuleContext } from '@shared/modules'
 import { cidrContains, ipToInt, parseCidr, parseRange, type TargetKind } from './net'
@@ -41,35 +42,39 @@ export interface TargetRule {
   createdAt: number
 }
 
-/** A unit the user decided every machine (or some of them) must be running. */
-export interface WatchedUnit {
+/**
+ * One template the user wrote or imported, kept as the raw document.
+ *
+ * Raw rather than parsed, for the same reason the agent keeps its own copies
+ * raw: it is re-validated on every read, so a document accepted by an older
+ * version of the schema stops loading when the rules tighten instead of being
+ * trusted forever because it was trusted once.
+ *
+ * The templates that ship with the module are **not** in here. They live in
+ * `service-fleet/templates/`, are part of the module folder hash, and are
+ * read-only - this is only what the user added on top.
+ */
+export interface StoredTemplate {
   id: string
-  /** Always normalised to `<name>.service`. */
-  unit: string
-  label?: string
-  severity: 'critical' | 'normal'
-  /** `docker.io`, or per manager: `apt=docker.io,dnf=moby-engine`. */
-  packages?: string
-  /** Overrides the package manager entirely. `{{package}}` and `{{unit}}` are filled in. */
-  installCommand?: string
-  enableOnInstall: boolean
-  startOnInstall: boolean
-  /** Comma-separated globs over address and label; empty means every machine. */
-  appliesTo?: string
+  /** The template document, exactly as it was imported. */
+  document: unknown
+  addedAt: number
+  updatedAt: number
 }
 
 export interface FleetConfig {
   version: 1
   targets: TargetRule[]
-  watched: WatchedUnit[]
+  templates: StoredTemplate[]
   rules: Partial<FleetRules>
+  /** Whether the explanatory notes are shown on every page. */
+  hintsOn: boolean
 }
 
 export const MAX_TARGETS = 200
-export const MAX_WATCHED = 100
 
 function emptyConfig(): FleetConfig {
-  return { version: 1, targets: [], watched: [], rules: {} }
+  return { version: 1, targets: [], templates: [], rules: {}, hintsOn: true }
 }
 
 function asString(value: unknown, fallback = ''): string {
@@ -91,13 +96,6 @@ function asAuth(value: unknown): AuthMode {
 
 function asSudo(value: unknown): SudoMode {
   return value === 'sudo-n' || value === 'sudo-password' ? value : 'none'
-}
-
-/** `docker` and `docker.service` are the same unit; store one of them. */
-export function normalizeUnit(raw: string): string {
-  const name = raw.trim()
-  if (!name) return ''
-  return /\.(service|socket|timer|target|path|mount|slice|scope)$/.test(name) ? name : `${name}.service`
 }
 
 /**
@@ -136,31 +134,24 @@ function normalize(raw: unknown): FleetConfig {
     })
     if (targets.length >= MAX_TARGETS) break
   }
-  const watched: WatchedUnit[] = []
-  const seenWatched = new Set<string>()
-  for (const entry of Array.isArray(r.watched) ? r.watched : []) {
+  const templates: StoredTemplate[] = []
+  const seenTemplates = new Set<string>()
+  for (const entry of Array.isArray(r.templates) ? r.templates : []) {
     if (typeof entry !== 'object' || entry === null) continue
-    const w = entry as Partial<WatchedUnit>
-    const id = asString(w.id)
-    const unit = normalizeUnit(asString(w.unit))
-    if (!id || !unit || seenWatched.has(id)) continue
-    seenWatched.add(id)
-    watched.push({
+    const t = entry as Partial<StoredTemplate>
+    const id = asString(t.id)
+    if (!id || seenTemplates.has(id) || typeof t.document !== 'object' || t.document === null) continue
+    seenTemplates.add(id)
+    templates.push({
       id,
-      unit,
-      label: asString(w.label) || undefined,
-      severity: w.severity === 'critical' ? 'critical' : 'normal',
-      packages: asString(w.packages) || undefined,
-      installCommand: asString(w.installCommand) || undefined,
-      enableOnInstall: w.enableOnInstall !== false,
-      startOnInstall: w.startOnInstall !== false,
-      appliesTo: asString(w.appliesTo) || undefined
+      document: t.document,
+      addedAt: typeof t.addedAt === 'number' ? t.addedAt : 0,
+      updatedAt: typeof t.updatedAt === 'number' ? t.updatedAt : 0
     })
-    if (watched.length >= MAX_WATCHED) break
   }
   const rules =
     typeof r.rules === 'object' && r.rules !== null ? (r.rules as Partial<FleetRules>) : {}
-  return { version: 1, targets, watched, rules }
+  return { version: 1, targets, templates, rules, hintsOn: r.hintsOn !== false }
 }
 
 /**

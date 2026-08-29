@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "id": "generic-binary",
+  "displayName": "Generic binary service",
+  "kind": "service",
+  "version": "1.0.0",
+  "description": "A shape to copy, not a service to run. Downloads one sha256-pinned binary, writes a unit around it and starts it. Change the id, the unit name and the fields, and you have a template for anything that is a single executable.",
+  "fields": [
+    {
+      "id": "binary_url",
+      "label": "Download URL",
+      "input": "text",
+      "required": true
+    },
+    {
+      "id": "binary_sha256",
+      "label": "SHA-256 of that file",
+      "input": "text",
+      "required": true,
+      "help": "Not optional. A URL says where a file came from; only a hash says what it is."
+    },
+    {
+      "id": "arguments",
+      "label": "Arguments",
+      "input": "text",
+      "required": false,
+      "default": "",
+      "help": "Passed to the binary as a single argument. A template cannot split a string into several arguments - that is deliberate, and it is why this template takes one."
+    }
+  ],
+  "service": {
+    "units": [
+      {
+        "unit": "generic-binary.service",
+        "primary": true,
+        "install": [
+          {
+            "op": "mkdir",
+            "path": "/opt/generic-binary"
+          },
+          {
+            "op": "download",
+            "url": "{{binary_url}}",
+            "dest": "/opt/generic-binary/service",
+            "sha256": "{{binary_sha256}}"
+          },
+          {
+            "op": "chmod",
+            "path": "/opt/generic-binary/service",
+            "mode": "0755"
+          },
+          {
+            "op": "writeFile",
+            "path": "/etc/systemd/system/generic-binary.service",
+            "mode": "0644",
+            "content": "[Unit]\nDescription=Generic binary service\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=/opt/generic-binary/service {{arguments}}\nRestart=always\nRestartSec=10\nDynamicUser=yes\n\n[Install]\nWantedBy=multi-user.target\n"
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "daemon-reload"
+            ]
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "enable",
+              "--now",
+              "generic-binary.service"
+            ]
+          }
+        ],
+        "uninstall": [
+          {
+            "op": "systemctl",
+            "argv": [
+              "disable",
+              "--now",
+              "generic-binary.service"
+            ],
+            "ignoreErrors": true
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "daemon-reload"
+            ],
+            "ignoreErrors": true
+          }
+        ]
+      }
+    ]
+  },
+  "validate": {
+    "logTail": 80,
+    "failPatterns": []
+  },
+  "redact": []
+}

@@ -1,8 +1,8 @@
 /**
- * The limits every sweep and every check measures against. They are defaults,
- * not constants: how hard you may lean on one jump host depends on the machine
- * and on how many machines are behind it, so each one can be overridden per
- * install from the module's own settings page.
+ * The limits every sweep, every fan-out and every check measures against. They
+ * are defaults, not constants: how hard you may lean on one jump host depends
+ * on the machine and on how many machines are behind it, so each one can be
+ * overridden per install from the module's own settings page.
  *
  * Read through `effectiveRules` and never cached: the user can change them
  * between two ticks, and a sweep that used yesterday's parallelism would be
@@ -10,16 +10,14 @@
  */
 import type { ModuleContext } from '@shared/modules'
 
-export type UnitScope = 'watched' | 'running' | 'all'
-
 export interface FleetRules {
-  /** How many ssh sessions the jump host opens at once (`xargs -P`). */
+  /** How many ssh sessions or curl requests the jump host opens at once (`xargs -P`). */
   maxParallel: number
-  /** ssh ConnectTimeout: how long a machine that is not there costs. */
+  /** Connect timeout, for both ssh and curl: what a machine that is not there costs. */
   connectTimeoutSec: number
-  /** `timeout` around one ssh, so a machine that answers but hangs still ends. */
+  /** Per-request ceiling, so a machine that answers but hangs still ends. */
   perHostTimeoutSec: number
-  /** `timeoutMs` for the whole fan-out command on the shared connection. */
+  /** `timeoutMs` for a whole SSH fan-out on the shared connection. */
   sweepTimeoutSec: number
   /** ssh ControlPersist: how long a reused connection is kept warm. 0 disables multiplexing. */
   controlPersistSec: number
@@ -27,18 +25,24 @@ export interface FleetRules {
   strictHostKey: boolean
   /** Refuse to enumerate a rule covering more addresses than this. */
   maxHosts: number
-  /** Which units a sweep asks each machine for. */
-  unitScope: UnitScope
-  /** Cap on the unit lines one machine may return. */
-  maxUnitsPerHost: number
-  /** How many chips one card carries; the rest are only in the drawer. */
-  cardUnits: number
-  /** Warn once a bulk action would touch this many machine/unit pairs. */
+
+  /** Port every agent is expected on. One number, because the installer fixes it. */
+  agentPort: number
+  /** How many chips one fleet card carries; the rest are only in the drawer. */
+  cardInstances: number
+  /** Warn once a bulk action would touch this many machines. */
   bulkWarnAt: number
-  /** Warn once an install would touch this many machines. */
+  /** Warn once installing the agent would touch this many machines. */
   installWarnAt: number
-  /** Whether a critical watched unit being down turns the card red instead of amber. */
-  criticalDownIsRed: boolean
+
+  /** How often telemetry is pulled from each agent, in minutes. */
+  telemetryEveryMin: number
+  /** How far back a first pull reaches when a machine has no cursor yet. */
+  telemetryBackfillDays: number
+  /** Cap on user-authored templates, so the config document stays inside its grant. */
+  maxTemplates: number
+  /** Whether an instance missing only an optional unit turns its card amber. */
+  degradedIsAmber: boolean
 }
 
 export const DEFAULT_RULES: FleetRules = {
@@ -49,43 +53,61 @@ export const DEFAULT_RULES: FleetRules = {
   controlPersistSec: 60,
   strictHostKey: false,
   maxHosts: 256,
-  unitScope: 'running',
-  maxUnitsPerHost: 120,
-  cardUnits: 12,
+
+  agentPort: 8741,
+  cardInstances: 12,
   bulkWarnAt: 25,
   installWarnAt: 10,
-  criticalDownIsRed: true
+
+  telemetryEveryMin: 30,
+  telemetryBackfillDays: 30,
+  maxTemplates: 40,
+  degradedIsAmber: true
 }
 
 /** What each numeric rule may be set to. A check reports anything outside as an error. */
 export const RULE_BOUNDS: Record<string, { min: number; max: number; label: string }> = {
   maxParallel: { min: 1, max: 64, label: 'Machines contacted at once' },
-  connectTimeoutSec: { min: 1, max: 30, label: 'SSH connect timeout (s)' },
+  connectTimeoutSec: { min: 1, max: 30, label: 'Connect timeout (s)' },
   perHostTimeoutSec: { min: 5, max: 300, label: 'Per-machine timeout (s)' },
   sweepTimeoutSec: { min: 30, max: 900, label: 'Whole sweep timeout (s)' },
   controlPersistSec: { min: 0, max: 600, label: 'Keep SSH connections warm (s)' },
   maxHosts: { min: 1, max: 4096, label: 'Largest address range' },
-  maxUnitsPerHost: { min: 10, max: 500, label: 'Unit lines per machine' },
-  cardUnits: { min: 4, max: 40, label: 'Chips per card' },
+  agentPort: { min: 1, max: 65535, label: 'Agent port' },
+  cardInstances: { min: 4, max: 40, label: 'Chips per card' },
   bulkWarnAt: { min: 1, max: 1000, label: 'Warn on bulk action size' },
-  installWarnAt: { min: 1, max: 1000, label: 'Warn on install size' }
+  installWarnAt: { min: 1, max: 1000, label: 'Warn on agent install size' },
+  telemetryEveryMin: { min: 5, max: 1440, label: 'Pull telemetry every (min)' },
+  telemetryBackfillDays: { min: 1, max: 400, label: 'First-pull backfill (days)' },
+  maxTemplates: { min: 1, max: 200, label: 'User templates kept' }
 }
 
 /** Extreme but legal values, worth a warning rather than a refusal. */
 export const RULE_UNUSUAL: Record<string, (value: number) => string | null> = {
   maxParallel: (v) =>
-    v > 32 ? 'More simultaneous SSH sessions than a small jump host usually has file descriptors for.' : null,
+    v > 32 ? 'More simultaneous sessions than a small jump host usually has file descriptors for.' : null,
   connectTimeoutSec: (v) =>
     v > 10 ? 'Every address that is not there costs this long, multiplied by the range size.' : null,
-  perHostTimeoutSec: (v) => (v < 10 ? 'A cold SSH handshake plus systemctl often takes longer than this.' : null),
+  perHostTimeoutSec: (v) =>
+    v < 10 ? 'A cold SSH handshake plus a probe often takes longer than this.' : null,
   sweepTimeoutSec: (v) =>
     v < 60 ? 'A range of any size will not finish inside this, and the sweep will be cut off.' : null,
   controlPersistSec: (v) =>
     v === 0 ? 'Every sweep will pay a full SSH handshake per machine again.' : null,
-  maxHosts: (v) => (v > 1024 ? 'That many machines per rule will make one sweep very long.' : null)
+  maxHosts: (v) => (v > 1024 ? 'That many machines per rule will make one sweep very long.' : null),
+  agentPort: (v) =>
+    v !== DEFAULT_RULES.agentPort
+      ? `The installer always binds ${DEFAULT_RULES.agentPort}. Change this only if something in front of the agent moves it.`
+      : null,
+  telemetryEveryMin: (v) =>
+    v < 15
+      ? 'Agents keep their own daily rows, so pulling more often than every quarter hour buys nothing.'
+      : null,
+  telemetryBackfillDays: (v) =>
+    v > 120
+      ? 'A first pull will fetch that many days from every agent at once, which is a lot of rows for one tick.'
+      : null
 }
-
-const UNIT_SCOPES: UnitScope[] = ['watched', 'running', 'all']
 
 /**
  * The rules in force: the defaults with whatever the user overrode on top. A
@@ -99,10 +121,6 @@ export function effectiveRules(ctx: ModuleContext): FleetRules {
   if (typeof overrides !== 'object' || overrides === null) return out
   for (const [key, value] of Object.entries(overrides as Record<string, unknown>)) {
     if (!(key in DEFAULT_RULES)) continue
-    if (key === 'unitScope') {
-      if (UNIT_SCOPES.includes(value as UnitScope)) out.unitScope = value as UnitScope
-      continue
-    }
     const expected = typeof DEFAULT_RULES[key as keyof FleetRules]
     if (typeof value !== expected) continue
     if (typeof value === 'number' && !Number.isFinite(value)) continue

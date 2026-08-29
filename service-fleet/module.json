@@ -2,71 +2,180 @@
   "apiVersion": 2,
   "id": "service-fleet",
   "name": "Services",
-  "version": "1.1.9",
-  "description": "Watch and control systemd services across every machine in an IP range from one page: a status wall per machine, bulk start/stop/restart with a check step, and bulk install of the units you decided every machine must have.",
+  "version": "2.0.0",
+  "description": "Watch and control a fleet of BoredAgents across an IP range: find machines over SSH, install the agent, deploy services from JSON templates, and keep a year of daily bandwidth, uptime and incident history for every one of them.",
   "author": "Bored Manager",
-  "minAppVersion": "0.4.0",
+  "minAppVersion": "0.5.0",
   "defaultEnabled": false,
   "entries": {
     "main": "main/index.ts"
   },
   "pages": [
-    { "id": "overview", "label": "Overview", "icon": "Gauge", "order": 33 },
-    { "id": "hosts", "label": "Machines", "icon": "Network", "order": 34 },
-    { "id": "units", "label": "Services", "icon": "ListTree", "order": 35 },
-    { "id": "rollout", "label": "Bulk install", "icon": "Layers", "order": 36 },
-    { "id": "jobs", "label": "Jobs", "icon": "Activity", "order": 37 },
-    { "id": "settings", "label": "Module settings", "icon": "Settings2", "order": 38 }
+    {
+      "id": "fleet",
+      "label": "Fleet",
+      "icon": "Gauge",
+      "order": 33
+    },
+    {
+      "id": "machines",
+      "label": "Machines",
+      "icon": "Network",
+      "order": 34
+    },
+    {
+      "id": "services",
+      "label": "Services",
+      "icon": "Container",
+      "order": 35
+    },
+    {
+      "id": "templates",
+      "label": "Templates",
+      "icon": "Layers",
+      "order": 36
+    },
+    {
+      "id": "reports",
+      "label": "Reports",
+      "icon": "FileText",
+      "order": 37
+    },
+    {
+      "id": "jobs",
+      "label": "Jobs",
+      "icon": "Activity",
+      "order": 38
+    },
+    {
+      "id": "settings",
+      "label": "Module settings",
+      "icon": "Settings2",
+      "order": 39
+    }
   ],
   "widgets": [
-    { "id": "summary", "label": "Service fleet", "defaultEnabled": true, "order": 8 },
-    { "id": "wall", "label": "Fleet status wall", "order": 75 }
+    {
+      "id": "summary",
+      "label": "Agent fleet",
+      "defaultEnabled": true,
+      "order": 8
+    },
+    {
+      "id": "wall",
+      "label": "Fleet status wall",
+      "order": 75
+    }
   ],
   "streams": [
-    { "event": "hosts", "kind": "latest" },
-    { "event": "series", "kind": "series" },
-    { "event": "jobs", "kind": "latest" },
-    { "event": "sweep", "kind": "latest" },
-    { "event": "capabilities", "kind": "latest" }
+    {
+      "event": "fleet",
+      "kind": "latest"
+    },
+    {
+      "event": "series",
+      "kind": "series"
+    },
+    {
+      "event": "jobs",
+      "kind": "latest"
+    },
+    {
+      "event": "sweep",
+      "kind": "latest"
+    },
+    {
+      "event": "capabilities",
+      "kind": "latest"
+    },
+    {
+      "event": "ui",
+      "kind": "latest"
+    }
   ],
   "methods": [
-    "hostRows",
+    "capabilities",
+    "ui",
+    "hintsSet",
+    "agentRows",
+    "instanceRows",
+    "netRows",
     "hostInspect",
-    "hostUnits",
-    "hostForget",
+    "hostInstances",
     "hostProbe",
-    "hostAction",
-    "unitRows",
-    "unitInspect",
-    "unitAction",
-    "bulkUnitAction",
-    "bulkActionCheck",
-    "bulkActionApply",
-    "logsStart",
-    "logsStop",
+    "hostForget",
     "sweepNow",
     "sweepCancel",
+    "collectNow",
+    "collectSummary",
+    "agentInstallCheck",
+    "agentInstallApply",
+    "agentUninstallCheck",
+    "agentUninstallApply",
+    "instanceAction",
+    "bulkInstanceAction",
+    "instanceLogs",
+    "deployCheck",
+    "deployApply",
+    "templateRows",
+    "templateFields",
+    "templateExport",
+    "templateImportCheck",
+    "templateImportApply",
+    "templateDelete",
+    "reportBandwidth",
+    "reportBandwidthSeries",
+    "reportUptime",
+    "reportUptimeSummary",
+    "reportIncidents",
+    "storageUsage",
     "targets",
     "targetCheck",
     "targetApply",
     "targetDelete",
     "targetTest",
-    "watched",
-    "watchedCheck",
-    "watchedApply",
-    "watchedDelete",
-    "installCheck",
-    "installApply",
     "rulesEffective",
     "rulesCheck",
     "rulesApply",
     "rulesReset",
-
     "jobCancel",
     "jobsClear",
     "selectOptions",
-    "capabilities"
+    "agentOptions",
+    "templateDetail",
+    "jobRows",
+    "jobItems"
   ],
+  "storage": {
+    "config": {
+      "maxKB": 1024
+    },
+    "hostData": {
+      "maxKB": 512
+    },
+    "history": {
+      "streams": [
+        "service-fleet"
+      ],
+      "maxMB": 32
+    },
+    "records": [
+      {
+        "id": "daily",
+        "label": "Daily bandwidth and uptime",
+        "maxMB": 128,
+        "retentionDays": 400,
+        "overflow": "evict-oldest"
+      },
+      {
+        "id": "events",
+        "label": "Network and service incidents",
+        "maxMB": 64,
+        "retentionDays": 180,
+        "overflow": "evict-oldest"
+      }
+    ]
+  },
   "fastInterval": "service-fleet",
   "slowInterval": "service-fleet"
 }

@@ -17,6 +17,8 @@ export interface JumpCapabilities {
   timeout: boolean
   mktemp: boolean
   nc: boolean
+  /** How every installed agent is reached. Without it the fleet is SSH-only. */
+  curl: boolean
   sshVersion: string
   /** Non-null when the module cannot work at all from here - blocks a sweep. */
   problem: string | null
@@ -24,7 +26,7 @@ export interface JumpCapabilities {
   warning: string | null
 }
 
-const TOOLS = ['ssh', 'sshpass', 'xargs', 'base64', 'timeout', 'mktemp', 'nc'] as const
+const TOOLS = ['ssh', 'sshpass', 'xargs', 'base64', 'timeout', 'mktemp', 'nc', 'curl'] as const
 
 const PROBE_SCRIPT = [
   `echo '===TOOLS==='`,
@@ -44,6 +46,7 @@ export function emptyCapabilities(): JumpCapabilities {
     timeout: false,
     mktemp: false,
     nc: false,
+    curl: false,
     sshVersion: '',
     problem: 'Not connected to a machine yet.',
     warning: null
@@ -70,6 +73,7 @@ export async function probeJumpHost(ctx: ModuleContext): Promise<JumpCapabilitie
     timeout: found.has('timeout'),
     mktemp: found.has('mktemp'),
     nc: found.has('nc'),
+    curl: found.has('curl'),
     sshVersion: (sections.get('VERSION') ?? '').trim().split('\n')[0] ?? '',
     problem: null,
     warning: null
@@ -77,6 +81,13 @@ export async function probeJumpHost(ctx: ModuleContext): Promise<JumpCapabilitie
   const missing = (['ssh', 'xargs', 'base64', 'mktemp'] as const).filter((tool) => !out[tool])
   if (missing.length) {
     out.problem = `The connected machine has no ${missing.join(', ')}. Install openssh-client and coreutils on it, or connect to a machine that has them.`
+  } else if (!out.curl) {
+    // Blocking rather than degrading. Everything after an agent is installed
+    // goes over HTTP through curl on this machine: without it the fleet can be
+    // discovered and agents can be installed, and then nothing can be watched
+    // or controlled, which is worse than saying so up front.
+    out.problem =
+      'The connected machine has no `curl`. Every installed agent is reached through it, so nothing can be monitored or controlled from here until it is installed (apt install curl).'
   } else if (!out.timeout) {
     // Degraded, not blocking: the fan-out script falls back to running ssh
     // without a per-host limit when `timeout` itself is missing (fanout.ts).

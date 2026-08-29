@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "id": "pawns-native",
+  "displayName": "Pawns.app (native)",
+  "kind": "service",
+  "version": "1.0.0",
+  "description": "The same Pawns CLI as a systemd unit rather than a container - the worked example of a host-native template. Fill in the release URL and its sha256 for the build you want; the agent refuses to download anything it cannot check against a hash.",
+  "fields": [
+    {
+      "id": "email",
+      "label": "Account email",
+      "input": "text",
+      "required": true
+    },
+    {
+      "id": "password",
+      "label": "Password",
+      "input": "password",
+      "required": true,
+      "secret": true
+    },
+    {
+      "id": "device_name",
+      "label": "Device name",
+      "input": "text",
+      "required": false,
+      "default": "Ubuntu"
+    },
+    {
+      "id": "device_id",
+      "label": "Device id",
+      "input": "text",
+      "required": false,
+      "default": "Ubuntu01"
+    },
+    {
+      "id": "binary_url",
+      "label": "Download URL",
+      "input": "text",
+      "required": true,
+      "help": "The pawns-cli release for this machine's architecture, from IPRoyal's own download page."
+    },
+    {
+      "id": "binary_sha256",
+      "label": "SHA-256 of that file",
+      "input": "text",
+      "required": true,
+      "help": "Run sha256sum on the file you downloaded. The agent will not install a binary whose hash it cannot confirm, because a URL can serve something different tomorrow."
+    }
+  ],
+  "service": {
+    "units": [
+      {
+        "unit": "pawns-native.service",
+        "primary": true,
+        "install": [
+          {
+            "op": "mkdir",
+            "path": "/opt/pawns-native"
+          },
+          {
+            "op": "download",
+            "url": "{{binary_url}}",
+            "dest": "/opt/pawns-native/pawns-cli",
+            "sha256": "{{binary_sha256}}"
+          },
+          {
+            "op": "chmod",
+            "path": "/opt/pawns-native/pawns-cli",
+            "mode": "0755"
+          },
+          {
+            "op": "writeFile",
+            "path": "/etc/systemd/system/pawns-native.service",
+            "mode": "0644",
+            "content": "[Unit]\nDescription=Pawns.app CLI\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart=/opt/pawns-native/pawns-cli -email={{email}} -password={{password}} -device-name={{device_name}} -device-id={{device_id}} -accept-tos\nRestart=always\nRestartSec=10\nDynamicUser=yes\n\n[Install]\nWantedBy=multi-user.target\n"
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "daemon-reload"
+            ]
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "enable",
+              "--now",
+              "pawns-native.service"
+            ]
+          }
+        ],
+        "uninstall": [
+          {
+            "op": "systemctl",
+            "argv": [
+              "disable",
+              "--now",
+              "pawns-native.service"
+            ],
+            "ignoreErrors": true
+          },
+          {
+            "op": "systemctl",
+            "argv": [
+              "daemon-reload"
+            ],
+            "ignoreErrors": true
+          }
+        ]
+      }
+    ]
+  },
+  "validate": {
+    "logTail": 80,
+    "failPatterns": [
+      "invalid credentials",
+      "authentication failed",
+      "unauthorized"
+    ]
+  },
+  "redact": [
+    "password"
+  ]
+}

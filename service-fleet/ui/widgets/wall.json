@@ -2,15 +2,29 @@
   "blocks": [
     {
       "type": "statusCards",
-      "source": { "kind": "stream", "event": "hosts", "path": "hosts" },
+      "source": {
+        "kind": "stream",
+        "event": "fleet",
+        "path": "hosts"
+      },
       "rowKey": "id",
       "titleKey": "ip",
       "statusKey": "status",
       "subtitleKey": "summary",
-      "note": { "key": "note", "label": "Notes" },
-      "items": { "key": "services", "visibleRows": 1, "emptyText": "No services reported" },
-      "columns": { "default": 2, "min": 1, "max": 3 },
-      "emptyText": "No machines watched yet"
+      "items": {
+        "key": "services",
+        "labelKey": "label",
+        "statusKey": "status",
+        "pinnedKey": "pinned",
+        "visibleRows": 1,
+        "emptyText": "nothing deployed"
+      },
+      "columns": {
+        "default": 2,
+        "min": 1,
+        "max": 4
+      },
+      "emptyText": "No machines yet - add an address range in Module settings."
     }
   ]
 }

@@ -18,17 +18,15 @@ import type { ModuleContext } from '@shared/modules'
 import type { OkResult } from '@shared/types'
 import {
   makeId,
-  normalizeUnit,
   ruleCovers,
   type AuthMode,
   type ConfigStore,
   type FleetConfig,
   type SudoMode,
-  type TargetRule,
-  type WatchedUnit
+  type TargetRule
 } from './config'
 import { classifyReach, reachMessage, runFanout } from './fanout'
-import { enumerateRule, ipToInt, matchesGlob, type TargetKind } from './net'
+import { enumerateRule, ipToInt, type TargetKind } from './net'
 import type { JumpCapabilities } from './probe'
 import type { Roster } from './roster'
 import {
@@ -36,10 +34,8 @@ import {
   RULE_BOUNDS,
   RULE_UNUSUAL,
   effectiveRules,
-  type FleetRules,
-  type UnitScope
+  type FleetRules
 } from './rules'
-import { isValidUnit } from './units'
 
 function text(values: Record<string, unknown>, key: string): string {
   const raw = values[key]
@@ -337,161 +333,9 @@ export class TargetEditor {
   }
 }
 
-// ---------------------------------------------------------------- watched units
-
-export class WatchedEditor {
-  private session = createCheckSession<WatchedUnit>()
-
-  constructor(
-    private ctx: ModuleContext,
-    private store: ConfigStore,
-    private roster: Roster
-  ) {}
-
-  clear(): void {
-    this.session.clear()
-  }
-
-  rows(): Array<Record<string, unknown>> {
-    const records = Object.values(this.roster.records())
-    return this.store.read().watched.map((def) => {
-      const scope = records.filter((record) => matchesGlob(def.appliesTo, [record.ip, record.label]))
-      let down = 0
-      for (const record of scope) {
-        const live = this.roster.liveFor(record.ip)
-        const state = live?.watched.find((entry) => entry.def.id === def.id)?.state
-        if (!state || state.active !== 'active') down++
-      }
-      return {
-        id: def.id,
-        unit: def.unit,
-        label: def.label ?? '',
-        severity: def.severity,
-        appliesTo: def.appliesTo ?? 'every machine',
-        appliesToRaw: def.appliesTo ?? '',
-        machines: scope.length,
-        down,
-        packages: def.packages ?? '',
-        installCommand: def.installCommand ?? '',
-        enableFlag: def.enableOnInstall,
-        startFlag: def.startOnInstall,
-        onInstall: [def.enableOnInstall ? 'enable' : '', def.startOnInstall ? 'start' : '']
-          .filter((part) => part)
-          .join(' + ')
-      }
-    })
-  }
-
-  check(editingId: string | null, raw: unknown): ModuleCheckReport {
-    const values = (raw ?? {}) as Record<string, unknown>
-    const config = this.store.read()
-    const existing = editingId ? config.watched.find((entry) => entry.id === editingId) : undefined
-    if (editingId && !existing) return failedCheck('That service is gone', 'Somebody removed it while this form was open.')
-
-    const findings: ModuleCheckFinding[] = []
-    const unit = normalizeUnit(text(values, 'unit'))
-    if (!unit) return failedCheck('Enter a unit name', 'For example `docker` or `nginx.service`.')
-    if (!isValidUnit(unit)) {
-      return failedCheck(
-        `"${unit}" is not a unit name`,
-        'Letters, digits, and @ : _ . - only, ending in .service (or .socket, .timer, .target, .path, .mount).'
-      )
-    }
-    const clash = config.watched.find((entry) => entry.unit === unit && entry.id !== editingId)
-    if (clash) findings.push({ level: 'error', label: `${unit} is already watched`, detail: 'Edit that entry instead.' })
-
-    const appliesTo = text(values, 'appliesTo')
-    const packages = text(values, 'packages')
-    const installCommand = text(values, 'installCommand')
-    const severity = text(values, 'severity') === 'critical' ? 'critical' : 'normal'
-    if (installCommand && /https?:\/\//i.test(installCommand)) {
-      findings.push({
-        level: 'error',
-        label: 'An install command may not fetch from a URL',
-        detail: 'Modules install from the machine\'s own package manager, not from the internet.'
-      })
-    }
-    if (hasBlockingFinding(findings)) return { ok: false, findings }
-
-    const records = Object.values(this.roster.records())
-    const scope = records.filter((record) => matchesGlob(appliesTo, [record.ip, record.label]))
-    findings.push({
-      level: 'pass',
-      label: `${unit} will be watched on ${appliesTo ? `machines matching "${appliesTo}"` : 'every machine'}`,
-      detail: `${scope.length} of the ${records.length} machines in the roster match right now.${
-        severity === 'critical'
-          ? ' Marked critical: a machine missing it or not running it goes red rather than amber.'
-          : ' A machine missing it or not running it goes amber.'
-      }`
-    })
-    if (appliesTo && scope.length === 0 && records.length > 0) {
-      findings.push({
-        level: 'warning',
-        label: 'No machine in the roster matches that filter',
-        detail: 'It will be watched on nothing until one does. Globs match the address or the rule label, e.g. `10.0.0.*`.'
-      })
-    }
-    if (!packages && !installCommand) {
-      findings.push({
-        level: 'info',
-        label: 'Bulk install will not be able to install it',
-        detail: 'Add a package name (or a per-manager list like `apt=docker.io,dnf=moby-engine`) to install it in bulk.'
-      })
-    }
-    if (installCommand) {
-      findings.push({
-        level: 'warning',
-        label: 'A custom install command replaces the package manager entirely',
-        detail: `It runs as root through sudo, once per machine: ${installCommand}`
-      })
-    }
-
-    const def: WatchedUnit = {
-      id: existing?.id ?? makeId('w', new Set(config.watched.map((entry) => entry.id))),
-      unit,
-      label: text(values, 'label') || undefined,
-      severity,
-      packages: packages || undefined,
-      installCommand: installCommand || undefined,
-      enableOnInstall: values['enableOnInstall'] !== false,
-      startOnInstall: values['startOnInstall'] !== false,
-      appliesTo: appliesTo || undefined
-    }
-    return { ok: true, token: this.session.issue(values, def), findings }
-  }
-
-  apply(editingId: string | null, raw: unknown): OkResult {
-    const payload = (raw ?? {}) as { token?: unknown; values?: unknown }
-    const token = typeof payload.token === 'string' ? payload.token : ''
-    const taken = this.session.take(token, payload.values)
-    if (!taken) return { ok: false, error: 'that check has expired or the form changed - check again' }
-    const def = taken.payload
-    if (editingId && def.id !== editingId) return { ok: false, error: 'that check was for a different service' }
-    this.store.update((config) => {
-      const at = config.watched.findIndex((entry) => entry.id === def.id)
-      if (at >= 0) config.watched[at] = def
-      else config.watched.push(def)
-    })
-    this.ctx.log(`service-fleet: watched service ${def.unit} ${editingId ? 'updated' : 'added'}`)
-    return { ok: true }
-  }
-
-  delete(idRaw: unknown): OkResult {
-    const id = String(idRaw ?? '')
-    const removed = this.store.update((config) => {
-      const before = config.watched.length
-      config.watched = config.watched.filter((entry) => entry.id !== id)
-      return before !== config.watched.length
-    })
-    return removed ? { ok: true } : { ok: false, error: 'no such watched service' }
-  }
-}
-
 // ---------------------------------------------------------------- rules
 
-type RuleOverrides = Partial<Record<keyof FleetRules, number | boolean | UnitScope>>
-
-const UNIT_SCOPES: UnitScope[] = ['watched', 'running', 'all']
+type RuleOverrides = Partial<Record<keyof FleetRules, number | boolean>>
 
 export class RulesEditor {
   private session = createCheckSession<RuleOverrides>()
@@ -545,30 +389,19 @@ export class RulesEditor {
       overrides[key as keyof FleetRules] = value
     }
 
-    const scope = text(values, 'unitScope')
-    if (UNIT_SCOPES.includes(scope as UnitScope)) {
-      overrides.unitScope = scope as UnitScope
-      if (scope === 'all') {
-        findings.push({
-          level: 'warning',
-          label: 'Listing every unit makes each sweep much larger',
-          detail: 'A machine has hundreds of units including inactive ones. Sensible for a handful of machines, not for a subnet.'
-        })
-      }
-      if (scope === 'watched') {
-        findings.push({
-          level: 'info',
-          label: 'Only watched services will be listed',
-          detail: 'Cards will show nothing else, and the Services page will only have the units you named.'
-        })
-      }
-    }
-
     // Checkboxes are always sent, so they are always an override - the form
     // writes them as shown, which is why the values in force are printed above it.
     const current = effectiveRules(this.ctx)
-    for (const key of ['strictHostKey', 'criticalDownIsRed'] as const) {
+    for (const key of ['strictHostKey', 'degradedIsAmber'] as const) {
       if (typeof values[key] === 'boolean') overrides[key] = values[key] as boolean
+    }
+    if (overrides.agentPort != null && overrides.agentPort !== DEFAULT_RULES.agentPort) {
+      findings.push({
+        level: 'warning',
+        label: `Agents will be looked for on port ${overrides.agentPort}`,
+        detail:
+          'The installer always binds 8741. Change this only if something in front of the agent moves it - every already-installed agent will stop answering until it does.'
+      })
     }
     if (overrides.strictHostKey === true) {
       findings.push({
@@ -625,7 +458,7 @@ export class RulesEditor {
     const kept: RuleOverrides = {}
     for (const [key, value] of Object.entries(taken.payload)) {
       if (value === DEFAULT_RULES[key as keyof FleetRules]) continue
-      kept[key as keyof FleetRules] = value as number | boolean | UnitScope
+      kept[key as keyof FleetRules] = value as number | boolean
     }
     this.write(kept)
     this.ctx.log(`service-fleet: rule overrides saved: ${Object.keys(kept).join(', ') || 'none'}`)

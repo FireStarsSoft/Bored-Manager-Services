@@ -7,3 +7,17 @@ service-fleet/.dist/
 *.log
 .claude/
 .cursor/
+
+# Working notes for whatever is being done right now: local scratch for whoever
+# is doing it, not source and not documentation. The same rule the OpenWRT repo
+# applies to its own Plan.MD.
+Plan.MD
+
+# Python build and test artefacts from the agent.
+__pycache__/
+*.py[cod]
+agent/venv/
+agent/.venv/
+agent/.pytest_cache/
+agent/*.egg-info/
+dist-agent/

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "honeygain",
+  "displayName": "Honeygain",
+  "kind": "container",
+  "version": "1.0.0",
+  "description": "Honeygain's official container. One device per public IP: their terms forbid several on one connection, and the Fleet page groups agents by public IP so you can see when two would collide.",
+  "fields": [
+    {
+      "id": "email",
+      "label": "Account email",
+      "input": "text",
+      "required": true,
+      "help": "The email you sign in to Honeygain with."
+    },
+    {
+      "id": "password",
+      "label": "Password",
+      "input": "password",
+      "required": true,
+      "secret": true
+    },
+    {
+      "id": "device",
+      "label": "Device name",
+      "input": "text",
+      "required": true,
+      "help": "How this machine appears in the Honeygain dashboard. Make it something you will recognise."
+    }
+  ],
+  "container": {
+    "units": [
+      {
+        "name": "honeygain",
+        "image": "honeygain/honeygain",
+        "primary": true,
+        "restart": "always",
+        "args": [
+          "-tou-accept",
+          "-email",
+          "{{email}}",
+          "-pass",
+          "{{password}}",
+          "-device",
+          "{{device}}"
+        ],
+        "preInstall": [
+          {
+            "op": "dockerRm",
+            "target": "honeygain",
+            "force": true,
+            "ignoreErrors": true
+          }
+        ]
+      }
+    ]
+  },
+  "validate": {
+    "logTail": 80,
+    "failPatterns": [
+      "invalid",
+      "unauthorized",
+      "login failed",
+      "wrong password"
+    ]
+  },
+  "redact": [
+    "password"
+  ]
+}

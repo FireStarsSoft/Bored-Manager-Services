@@ -5,15 +5,17 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "specs": "tsx scripts/check-specs.mjs",
+    "check": "npm run sdk:check && npm run typecheck && npm test && npm run specs && npm run compile",
     "compile": "tsx scripts/compile-module.mjs",
+    "specs": "tsx scripts/check-specs.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "agent:pack": "node scripts/package-agent.mjs dist",
+    "agent:test": "python -m pytest agent/tests -q",
     "pack": "node scripts/package-module.mjs service-fleet dist",
     "sdk:check": "node scripts/sync-sdk.mjs --check",
-    "sdk:sync": "node scripts/sync-sdk.mjs",
     "sdk:drift": "node scripts/sync-sdk.mjs --against main",
-    "check": "npm run sdk:check && npm run typecheck && npm test && npm run specs && npm run compile"
+    "sdk:sync": "node scripts/sync-sdk.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

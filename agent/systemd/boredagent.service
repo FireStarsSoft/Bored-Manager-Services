@@ -1,0 +1,45 @@
+[Unit]
+Description=BoredAgent fleet agent
+Documentation=https://github.com/FireStarsSoft/Bored-Manager-Services
+After=docker.service network-online.target
+Wants=network-online.target
+# Not Requires=docker.service: an agent on a machine that only runs host-native
+# units, or one whose Docker is temporarily broken, must still start - it still
+# monitors the network and still answers a fleet manager. Docker being absent is
+# reported through /v1/info, not by refusing to run.
+After=docker.socket
+
+[Service]
+Type=simple
+User=boredagent
+Group=docker
+WorkingDirectory=/opt/boredagent
+ExecStart=/opt/boredagent/venv/bin/python -m boredagent serve
+Restart=always
+RestartSec=3
+Environment=BOREDAGENT_CONFIG=/etc/boredagent/config.toml
+Environment=PYTHONUNBUFFERED=1
+
+# Per-process byte accounting for host-native units reads socket information
+# belonging to other users, which needs more than an unprivileged user has.
+# These two capabilities are the narrow grant that buys it; the service still
+# runs as `boredagent` rather than as root.
+#   CAP_NET_ADMIN       - `ss -i` socket diagnostics for other users' sockets
+#   CAP_DAC_READ_SEARCH - reading /sys/fs/cgroup/system.slice/*/cgroup.procs
+AmbientCapabilities=CAP_NET_ADMIN CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_READ_SEARCH
+
+# Hardening. Deliberately not ProtectSystem=strict or PrivateNetwork: the agent
+# writes to /var/lib/boredagent and has to be able to reach the network it is
+# measuring, and a template's `writeFile` targets /etc/systemd/system.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=no
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

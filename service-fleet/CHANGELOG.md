@@ -1,6 +1,22 @@
 # Changelog
 
-Module versions are independent of the app's. Needs Bored Manager **0.4.0** for `ctx.isPrimaryInstance`; the `pie` block arrived in 0.3.3.
+Module versions are independent of the app's. Needs Bored Manager **0.5.0** for the declared storage API (`ctx.recordAppend` and friends), which is what keeps a year of daily figures.
+
+## 2.0.0
+
+**A different module with the same name. It managed systemd units over SSH; it now manages a fleet of agents, and the services those agents run.**
+
+- **Everything the old module did is gone**, and nothing carries over except the address rules. The status wall, the bulk `systemctl` actions and the unit installer were all built around asking each machine about its units on every sweep - which is precisely the design that made a subnet expensive to watch. What replaces them is [BoredAgent](../agent/): a daemon on each machine that already knows what it is running, measures its own connection once a second, and answers over HTTP.
+- **Two transports, doing different jobs.** SSH still finds machines and installs the agent - it is the only thing that can tell "nothing is at .137" from "a machine is there and refuses the login". Everything after that goes over HTTP through `curl` on the jump host, which is what makes a bulk action cheap enough to offer: twenty containers stopped is twenty requests from one machine rather than twenty SSH sessions.
+- **A request is identified by its position, not its address.** One batch routinely asks the same machine two things - its daily rollups and its incidents - and an address-keyed frame collapsed those into whichever answered last. Found by the test that asks for both.
+- **Services are described by JSON templates, not by code.** Six ship: Honeygain, Pawns.app and PacketStream as containers, Pawns.app again as a native systemd unit, and two generic shapes to copy. A template can never express a shell command - a fixed operation list, argv only, `{{field}}` always producing exactly one argument, every download carrying a SHA-256, writes confined to a few directories. The one escape hatch declares itself and is warned about before it deploys.
+- **The same rules are enforced twice, deliberately.** The agent's validator is the one that matters; this module's copy exists so a bad template is refused before it reaches fifty machines rather than by the first one to run it.
+- **A year of daily bandwidth, uptime and incidents.** Each agent folds its own day into one row per service and keeps over four hundred of them; this module pulls whatever is newer than the last row it stored. Being switched off for a week costs nothing - the next collection fetches the week. Stored through the app's new declared storage rather than in a 512 KB JSON blob, because that is what the app grew a storage API for.
+- **Bandwidth says how exact it is.** Containers have real counters. A service running directly on the host does not - Linux has no per-process byte counter - so its figure is summed from socket counters and misses connections that open and close between two samples. Those rows are flagged as a floor and labelled in the UI, rather than presented as a total.
+- **Uptime does not count time nobody was measuring.** A gap in the agent's own heartbeat is recorded as an incident and excluded, so a day the agent spent switched off does not roll up as a day of perfect uptime and no traffic.
+- **A page for the thing these services actually forbid.** Most of them prohibit several devices behind one connection. Every agent reports the public address it sees itself as; Fleet → Public addresses groups by it and names the machines running the same service on one address. The deploy check warns before it happens rather than after the account is suspended.
+- **Seven pages, rewritten in the OpenWRT module's idiom** - one rail per page, a readiness gate before any figure, a `checkForm` for every mutation, explanatory prose in notes the hints switch can hide, and state banners it never can. Those conventions are asserted in `tests/unit/page-layout.test.ts`, because the reason they stayed coherent in OpenWRT is that CI said so.
+- **`minAppVersion` is 0.5.0**, for the storage API. The module declares what it needs in its manifest and the app grants it; Settings → Data & storage shows what it is actually using.
 
 ## 1.1.9
 

@@ -1,0 +1,7 @@
+# Runtime dependencies. Kept small on purpose: every one of these is code that
+# runs as a privileged service on someone's home machine.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+typer>=0.15
+httpx>=0.28
+docker>=7.1

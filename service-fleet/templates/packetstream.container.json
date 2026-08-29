@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "packetstream",
+  "displayName": "PacketStream",
+  "kind": "container",
+  "version": "1.0.0",
+  "description": "PacketStream's psclient, plus the watchtower container that keeps its image current. Watchtower is optional: without it the instance is degraded, not broken, because psclient goes on earning from an older image.",
+  "fields": [
+    {
+      "id": "cid",
+      "label": "CID",
+      "input": "password",
+      "required": true,
+      "secret": true,
+      "help": "From the PacketStream dashboard's Setup page. It is the only credential the container takes, and it identifies your account - treat it as a password."
+    }
+  ],
+  "container": {
+    "units": [
+      {
+        "name": "psclient",
+        "image": "packetstream/psclient:latest",
+        "primary": true,
+        "restart": "always",
+        "env": {
+          "CID": "{{cid}}"
+        },
+        "preInstall": [
+          {
+            "op": "dockerStop",
+            "target": "psclient",
+            "ignoreErrors": true
+          },
+          {
+            "op": "dockerRm",
+            "target": "psclient",
+            "force": true,
+            "ignoreErrors": true
+          }
+        ]
+      },
+      {
+        "name": "watchtower",
+        "image": "containrrr/watchtower",
+        "optional": true,
+        "restart": "always",
+        "volumes": [
+          "/var/run/docker.sock:/var/run/docker.sock"
+        ],
+        "args": [
+          "--cleanup",
+          "--include-stopped",
+          "--include-restarting",
+          "--revive-stopped",
+          "--interval",
+          "60",
+          "psclient"
+        ],
+        "preInstall": [
+          {
+            "op": "dockerStop",
+            "target": "watchtower",
+            "ignoreErrors": true
+          },
+          {
+            "op": "dockerRm",
+            "target": "watchtower",
+            "force": true,
+            "ignoreErrors": true
+          }
+        ]
+      }
+    ]
+  },
+  "validate": {
+    "logTail": 80,
+    "failPatterns": [
+      "invalid cid",
+      "unauthorized",
+      "forbidden"
+    ]
+  },
+  "redact": [
+    "cid"
+  ]
+}

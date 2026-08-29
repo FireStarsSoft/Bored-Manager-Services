@@ -1,132 +1,143 @@
 # Services
 
-Watch and control systemd services across every machine in an IP range, from the one machine Bored Manager is connected to.
+A fleet of [BoredAgents](../agent/), watched and controlled from one page.
 
-## Installing
-
-This module is not part of the app download. Install it from **Settings →
-Modules**, by any of:
-
-- **Official list** - pick *Services* from the list the app ships;
-- **GitHub repo** - `FireStarsSoft/Bored-Manager-Services`, which installs the
-  latest release;
-- **From file** - the `service-fleet-<version>.zip` attached to a
-  [release](https://github.com/FireStarsSoft/Bored-Manager-Services/releases).
-
-It needs Bored Manager **0.4.0** or newer, and installs switched off; enable
-it in the same place. Source, issues and changelog live in
-[FireStarsSoft/Bored-Manager-Services](https://github.com/FireStarsSoft/Bored-Manager-Services).
-
-## What it adds
-
-| Where | What |
-|---|---|
-| Sidebar → Services | **Overview** (a status wall, one card per machine), **Machines**, **Services** (every machine and unit in one table), **Bulk install**, **Jobs**, **Module settings** |
-| Overview cards | **Service fleet** (status donut, on by default) and **Fleet status wall** (the same wall, compact) |
-| History | `service-fleet`: machines up, unreachable, degraded, services running and failed |
+Point it at an IP range. It finds the machines over SSH, offers to install the
+agent on the ones that do not have it, and from then on drives everything over
+each agent's own API: deploy a service from a JSON template, watch what it is
+doing, and keep a year of daily bandwidth, uptime and incident history for every
+machine.
 
 ## How it reaches other machines
 
-A module can only run commands on the machine the app is connected to. So that machine becomes a **jump host**: one command is sent to it, and that command opens up to `maxParallel` SSH sessions of its own and pipes a small script into each target's `sh -s`.
+`ctx.exec` only ever talks to the one machine the app is connected to, so that
+machine becomes a jump host. Two transports run from there, and the split is the
+whole design:
 
-That means the connected machine needs:
+| | Used for | Why |
+|---|---|---|
+| **SSH** (`main/fanout.ts`) | finding machines, installing and removing the agent | The only thing that can tell "nothing is at .137" from "a machine is there and refuses the login". Expensive: a session per machine. |
+| **HTTP** (`main/agentfan.ts`) | everything an installed agent can answer | One `curl` per request from the jump host. Stopping twenty containers is twenty requests, not twenty SSH sessions. |
 
-- `ssh` (openssh-client), `xargs`, `base64` and `mktemp` — without these the module cannot work at all and says so on every page;
-- `timeout` — without it one wedged machine can hold a sweep until the whole command times out;
-- `sshpass` — only for addresses that log in with a password. An SSH key needs nothing extra.
+Both carry the same three properties, and any edit has to keep them:
 
-Settings → Module settings shows exactly which of these were found. SSH connections are multiplexed (`ControlMaster` / `ControlPersist`), so the second sweep of a subnet is much faster than the first — that is what makes a `/24` practical.
-
-The address rules, watched units and roster all belong to the module, not to whichever machine happens to be the jump host - connect a second machine with this module enabled and it reaches the *same* fleet. So that the automatic sweep does not run twice against it, only one connected machine's instance runs it: whichever has this module's tab open, or the one that connected first if none does. A manually pressed "Sweep now" always runs, from whichever machine is open.
+1. **No secret is ever an argument.** SSH passwords ride stdin into `sshpass -f`;
+   agent tokens go into a `curl --config` file inside a `0700` temp directory.
+   `ps` on either machine shows flags and nothing else.
+2. **Everything has a timeout**, per request and per batch, plus an
+   `AbortSignal` so a cancelled sweep frees the jump host immediately.
+3. **Output is framed and bounded.** `xargs -P` interleaves, so each request
+   writes its own files and the frame is reassembled in ask order. A request is
+   identified by its **index**, not its address - one batch routinely asks the
+   same machine two things.
 
 ## Which machines get a card
 
-An address inside a subnet only earns a card once something at that address answers. Three things count:
+An address inside a range that nothing answered from is a *candidate*, not a
+machine: it is swept and stays out of the roster. Without that, watching one
+`/24` would draw 249 red cards for addresses nothing has ever lived at.
 
-- an answer that proves a machine is there, **including one that refuses the login** or presents an unexpected host key — "found it, cannot get in" is the case most worth seeing;
-- being added as a single address rather than found inside a block, so a machine that has never once answered is visibly down rather than absent;
-- having earned a card before — a machine that stops answering turns red, it does not disappear.
+Three things earn a card: an answer that proves a machine is there (**including**
+one that refuses the login), being named as a single address, or having earned
+one before. Once earned, a card is kept - a machine that stops answering turns
+red rather than disappearing.
 
-Without that rule, watching one `/24` would draw 249 red cards for addresses nothing has ever lived at.
-
-## What the colours mean
-
-| Colour | Meaning |
+| Colour | Means |
 |---|---|
-| Green | Reached, and every watched service that applies to it is running |
-| Amber | Reached, but a watched service is stopped, failed, masked or not installed; or the machine has no systemd; or nothing can be started on it because sudo is not usable |
-| Red | Not reachable, or a service marked **critical** is down (`criticalDownIsRed`) |
-| Grey | Not swept yet |
+| green | The agent is ready and everything it was asked to run is running. |
+| amber | No agent, an out-of-date agent, a token that was refused, or a degraded service. The machine is fine; the fleet does not fully manage it. |
+| red | Nothing answered, a service failed, or the machine itself reports no internet. |
+| grey | Not checked yet. Never an invented zero. |
 
-Each card shows the watched services first, then whatever else is running. The rest are in the card's drawer, along with the machine's details and an SSH shell.
+`no-agent` is deliberately its own colour: the machine answered, the agent is
+simply not installed, and that is one click away from being fixed.
 
-## Check, then confirm
+## Templates
 
-Everything that changes more than one thing is a check/apply pair: the module resolves what would happen, reports it, and only then offers to apply. The check **freezes the resolved list** into its token, so a machine that appeared while the report was being read is not acted on — and a bulk install freezes the exact commands, so what runs is what was read.
+A template is a JSON document describing one service - which containers or
+systemd units it owns, and which values it needs from you. Six ship in
+[`templates/`](templates/): three containers (Honeygain, Pawns.app,
+PacketStream), one native platform under systemd, and two generic shapes to copy.
 
-- **Bulk action by description** — "restart every failed `docker.service` on `10.0.0.*`".
-- **Bulk install** — installs a watched service everywhere it is missing, using each machine's own package manager.
-- **Address rules** and **watched services** — so a subnet that covers 65 thousand addresses is refused before it is saved, not on the next sweep.
-- **Rules** — the limits everything else measures against.
+They are validated twice, by two implementations, on purpose. The agent's copy
+is the one that matters - it stands between a JSON document and root on
+somebody's machine. This module's copy (`main/templates/validate.ts`) exists so
+you are told what is wrong *before* it is pushed to fifty machines.
 
-Ticking rows in the Services table and pressing Start or Stop skips the check step: what is selected is on screen already, and every one of those buttons asks for confirmation first.
+What a template can never express:
+
+- **a shell command.** A fixed list of operations, argv only. The one escape
+  hatch, `script`, requires `"privileged": true` and is warned about loudly.
+- **an argument that splits.** `{{field}}` always becomes exactly one argv
+  element, so a password containing a space or a semicolon cannot become two.
+- **an unverified download.** Every `download` needs a `sha256`. It may come
+  from a field - so a generic template can ask you for both - but never absent.
+- **a write outside** `/etc/systemd/system`, `/opt`, `/usr/local/bin` and the
+  module's own directories. Paths are literal; a field cannot build one.
+
+Editing a shipped template is exporting it, changing it, and importing it under
+the same id. The library then shows it as yours.
+
+## Reports
+
+Each agent measures its own services once a minute and folds each day into one
+row, keeping over a year of them. This module pulls whatever is newer than the
+last row it stored - so being switched off for a week costs nothing, and the
+next collection fetches the week.
+
+**Bandwidth is exact for containers and a floor for host-native services.**
+Docker keeps per-container counters; Linux has no per-process byte counter, so a
+systemd unit's figure is summed from the socket counters `ss` reports for the
+processes in its cgroup. That misses connections which open and close between
+two samples, and UDP entirely. Those rows are flagged `floor` and labelled -
+a lower bound that says so is worth more than a precise-looking number that is
+wrong.
+
+Uptime excludes time the agent itself was not running: that is recorded as an
+`agent_gap` incident rather than counted as perfect uptime.
 
 ## Credentials are stored in clear text
 
-A password typed into an address rule is written to `data/user-settings/module-config/service-fleet.json` **unencrypted**. A module has no way to encrypt anything: `ctx.configSet` writes plain JSON, and the app's own encryption is server-private. The check that saves a rule says so every time.
+SSH passwords, sudo passwords and **agent tokens** are all stored unencrypted -
+the first two in this module's settings, the token per machine in its host data.
+A module has no encryption available to it and pretending otherwise would be
+worse than saying so. SSH keys are the recommended way in; the settings page
+says this too.
 
-Use an SSH key where you can — there is then nothing to store. The key path is read on the **connected machine**, not on the server running Bored Manager.
-
-Passwords never appear in a process list on either machine: a login password is written to a file inside a private temporary directory and handed to `sshpass -f`, and a sudo password is a shell variable inside the script that is piped to the target.
+The platform credentials you deploy (a Honeygain password, a PacketStream CID)
+are stored by the *agent*, at `/var/lib/boredagent/credentials.json` mode `0640`.
+They are never returned by its API and are masked in every log line it serves.
 
 ## What it runs on the target
 
-A sweep only reads, and needs no sudo:
-
-```sh
-hostname; . /etc/os-release; command -v systemctl; id -u; uname -r; cut -d' ' -f1 /proc/uptime
-systemctl list-units --type=service --state=running,failed --plain --no-legend --no-pager
-systemctl show --no-pager -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState -p Description <watched units>
-sudo -n true          # only to find out whether control is possible
-```
-
-An action runs `systemctl <action> <unit>` as root, through `sudo -S` or `sudo -n` per the address rule. Bulk install adds the machine's own package manager (`apt-get install -y`, `dnf install -y`, `zypper --non-interactive install`, `pacman -S --noconfirm`, `apk add`) and then `systemctl enable` / `start`. Nothing is ever written to the target's disk, and nothing is downloaded — a custom install command containing a URL is refused.
-
-Only systemd is supported. A machine without it gets an amber card saying so rather than an empty one.
+Two things, and nothing else. The SSH sweep runs a short probe that reads the
+hostname, the distribution, whether a `boredagent` unit exists and whether
+Docker answers - a few hundred bytes, bounded, no unit enumeration. Installing
+the agent runs `agent-install.sh`, which the machine downloads itself and checks
+against a SHA-256 before unpacking.
 
 ## Settings it reads
 
-| Setting | What it does |
-|---|---|
-| Update intervals → Services (fleet) → slow | How often every machine is swept over SSH. **Manual only** is a real choice; the sweep then runs on request and after an action. |
-| Update intervals → Services (fleet) → fast | How often the pages re-read the last sweep. This never touches the network. |
-| Module settings → Rules | Parallelism, timeouts, connection reuse, the largest range allowed, how much of each machine to read, and when a check starts warning. |
-
-Only the sweep, the jobs, and four explicit buttons (Probe, Test, a unit's detail panel, an action) go to the network. Everything the pages poll is answered from memory.
-
-## When it shows nothing
-
-- **"This module cannot reach anything from here"** — the connected machine has no `ssh`. Install openssh-client on it, or connect somewhere that has it.
-- **No cards** — either nothing is configured yet, or nothing in the configured range answered. Machines page → Sweep now, and check the address rule's **Test**.
-- **No services on a card** — the machine was reached but has no systemd, or the rules are set to list only watched services and none apply here.
+`refresh['service-fleet']` is how often the pages re-read what is already in
+memory. `slowRefresh['service-fleet']` is how often the sweep actually runs -
+"Manual only" is a real choice. Telemetry collection has its own, slower timer,
+set in Rules.
 
 ## Files
 
 | File | What |
 |---|---|
-| `main/index.ts` | `activate`: builds everything, registers every method the manifest declares, owns the lifecycle |
-| `main/fanout.ts` | The jump-host script, the stdin protocol, and the framing that survives `xargs -P` |
-| `main/units.ts` | The scripts that run on the monitored machines, and their parsers |
-| `main/sweep.ts` | The poller: plan the addresses, fan out, publish the wall |
-| `main/roster.ts` | Which addresses are machines, what colour each card is, and the table rows |
-| `main/store.ts` | The roster and job history on disk, per jump host |
-| `main/config.ts` | Address rules, watched services, and which credentials reach one address |
-| `main/net.ts` | IPv4 arithmetic and the machine-matching globs |
-| `main/rules.ts` | The limits, their bounds, and the overrides in force |
-| `main/probe.ts` | What the connected machine can do for us |
-| `main/actions.ts` | One machine or many: `systemctl`, and the `journalctl` tail |
-| `main/jobs.ts` | Cancellable jobs, one item per machine |
-| `main/bulk.ts` | Bulk action by description, with the resolved list frozen into the token |
-| `main/install.ts` | Bulk install, with the exact commands frozen into the token |
-| `main/editors.ts` | The check/apply pairs behind address rules, watched services and rules |
-| `main/options.ts` | What the dropdowns offer, all from memory |
+| `main/index.ts` | Wires everything and registers every method. |
+| `main/fanout.ts` | The SSH jump-host protocol. |
+| `main/agentfan.ts` | The HTTP fan-out, through `curl`. |
+| `main/hostprobe.ts` | The short script the SSH sweep runs. |
+| `main/sweep.ts` | Two passes - SSH to find, HTTP to ask - and the poller. |
+| `main/roster.ts` | Which addresses are machines, card colour, every table's rows. |
+| `main/agent/` | The pinned release, detection, install and removal. |
+| `main/templates/` | The validator, the library, importing, deploying. |
+| `main/telemetry/` | Pulling daily rows and incidents, and the report queries. |
+| `main/actions.ts` | Instance lifecycle over HTTP. |
+| `main/badges.ts` | One colour per meaning, for every chip. |
+| `main/store.ts` · `main/config.ts` | Per-machine state; what the user typed. |
+| `templates/*.json` | The six templates that ship. |
+| `ui/pages/*.json` | The seven pages. |

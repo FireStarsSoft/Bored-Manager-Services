@@ -1,12 +1,13 @@
 /**
- * Turning one sweep into what the pages show: which addresses are machines,
- * what colour each card is, and the rows behind the tables.
+ * Which addresses count as machines, what colour each card is, and the rows
+ * behind every table.
  *
  * The rule that decides whether an address is a machine at all is the important
- * one. An address inside a `/24` that nothing answered from is a **candidate**,
- * not a machine: it is swept, and it stays out of the roster. Without that,
- * watching one subnet would draw 249 red cards for addresses nothing has ever
- * lived at, and the five machines that matter would be lost among them.
+ * one, and it is unchanged from when this module watched systemd units. An
+ * address inside a `/24` that nothing answered from is a **candidate**, not a
+ * machine: it is swept, and it stays out of the roster. Without that, watching
+ * one subnet would draw 249 red cards for addresses nothing has ever lived at,
+ * and the five machines that matter would be lost among them.
  *
  * Three things earn a card:
  *
@@ -20,12 +21,17 @@
  * Once an address has earned a card it keeps it, so a machine that stops
  * answering turns red rather than disappearing - which is the whole point of
  * watching it.
+ *
+ * What changed is what a card *says*. It used to be systemd units; it is now
+ * the agent and whatever the agent is running.
  */
-import { resolveCredential, ruleCovers, type TargetRule, type WatchedUnit } from './config'
-import { compareIp, matchesGlob } from './net'
+import { chip, countBadges, statusBadges, statusTone, BADGE, type StatusChip } from './badges'
+import { resolveCredential, ruleCovers, type TargetRule } from './config'
+import { compareIp } from './net'
 import type { FleetRules } from './rules'
 import type { HostRecord, HostStore, Reachability } from './store'
-import { canControl, type HostFacts, type UnitState } from './units'
+import type { HostFacts } from './hostprobe'
+import { agentUsable, type AgentInfo } from './agent/types'
 
 export type CardStatus = 'ok' | 'warn' | 'bad' | 'unknown'
 
@@ -34,13 +40,10 @@ export interface SweepEntry {
   cred: TargetRule
   reach: Reachability
   reachMessage: string
+  /** Who the machine says it is, from the SSH probe. Null when it did not answer. */
   facts: HostFacts | null
-}
-
-/** A watched unit resolved against one machine: `state` is null when the machine was not reached. */
-export interface WatchedState {
-  def: WatchedUnit
-  state: UnitState | null
+  /** What the agent said, or null when it was never asked or never answered. */
+  agent: AgentInfo | null
 }
 
 export interface HostLive {
@@ -48,19 +51,12 @@ export interface HostLive {
   cred: TargetRule
   reach: Reachability
   reachMessage: string
-  facts: HostFacts | null
-  watched: WatchedState[]
+  agent: AgentInfo | null
   status: CardStatus
   summary: string
   note: string
   /** One line per thing wrong, for the note and the drawer. */
   problems: string[]
-}
-
-export interface Chip {
-  label: string
-  status: CardStatus
-  pinned: boolean
 }
 
 export interface HostCard {
@@ -69,7 +65,7 @@ export interface HostCard {
   status: CardStatus
   summary: string
   note: string
-  services: Chip[]
+  services: StatusChip[]
   /** So the card's drawer can open a shell without a second round trip. */
   username: string
   port: number
@@ -77,13 +73,18 @@ export interface HostCard {
 
 export interface FleetCounts {
   total: number
-  online: number
-  offline: number
-  degraded: number
+  /** Agents answering, at any version. */
+  ready: number
+  /** Reachable over SSH with no agent - the one the user can fix in a click. */
+  noAgent: number
+  /** Nothing answered at all. */
+  unreachable: number
   unknown: number
-  unitsRunning: number
-  unitsFailed: number
-  watchedDown: number
+  instancesRunning: number
+  instancesDegraded: number
+  instancesFailed: number
+  /** Agents whose own probe says the machine has no internet. */
+  hostsOffline: number
 }
 
 export interface HostsPayload {
@@ -108,73 +109,57 @@ function provesAMachine(reach: Reachability): boolean {
   return reach === 'ok' || reach === 'auth' || reach === 'hostkey' || reach === 'refused'
 }
 
-/** Which watched units a machine is supposed to be running. */
-export function watchedFor(
-  watched: readonly WatchedUnit[],
-  ip: string,
-  label: string | undefined
-): WatchedUnit[] {
-  return watched.filter((w) => matchesGlob(w.appliesTo, [ip, label]))
+/** How one instance's state reads as a colour. */
+export function instanceStatus(state: string, degradedIsAmber: boolean): CardStatus {
+  switch (state) {
+    case 'running':
+      return 'ok'
+    case 'degraded':
+      return degradedIsAmber ? 'warn' : 'ok'
+    case 'failed':
+      return 'bad'
+    case 'stopped':
+    case 'absent':
+      return 'warn'
+    default:
+      return 'unknown'
+  }
 }
 
-/** How a single unit's state reads as a colour. `watched` units are held to a higher standard. */
-export function unitStatus(state: UnitState | null, watchedUnit: boolean, critical: boolean): CardStatus {
-  if (!state) return 'unknown'
-  if (state.load === 'not-found') return watchedUnit && critical ? 'bad' : watchedUnit ? 'warn' : 'unknown'
-  if (state.load === 'masked' || state.fileState === 'masked') return watchedUnit ? 'warn' : 'unknown'
-  if (state.active === 'failed' || state.sub === 'failed') return 'bad'
-  if (state.active === 'active') return 'ok'
-  if (state.active === 'activating' || state.active === 'deactivating') return 'warn'
-  return watchedUnit ? 'warn' : 'unknown'
+/** How one agent's state reads as a colour. */
+export function agentStatus(info: AgentInfo | null, reach: Reachability): CardStatus {
+  if (!info) return reach === 'ok' ? 'unknown' : 'bad'
+  switch (info.state) {
+    case 'ready':
+      return 'ok'
+    case 'outdated':
+      return 'warn'
+    case 'none':
+    case 'untrusted':
+      // Reachable, and this module cannot use it. Amber rather than red: the
+      // machine is fine, the fleet simply does not manage it yet.
+      return 'warn'
+    default:
+      return 'bad'
+  }
 }
 
-/** One word for what a unit is doing, in the vocabulary a person would use. */
-export function healthLabel(state: UnitState | null): string {
-  if (!state) return 'unknown'
-  if (state.load === 'not-found') return 'not installed'
-  if (state.load === 'masked' || state.fileState === 'masked') return 'masked'
-  if (state.active === 'failed' || state.sub === 'failed') return 'failed'
-  if (state.active === 'active') return state.sub === 'running' ? 'running' : state.sub || 'active'
-  if (state.active === 'activating') return 'starting'
-  if (state.active === 'deactivating') return 'stopping'
-  return state.active || 'stopped'
-}
-
-/** Short enough for a chip: no `.service`, and the state only when it is not simply running. */
-export function chipLabel(state: UnitState | null, unit: string): string {
-  const name = unit.replace(/\.service$/, '')
-  const health = healthLabel(state)
-  return health === 'running' || health === 'unknown' ? name : `${name} (${health})`
-}
-
-function relative(from: number | null): string {
-  if (!from) return 'never'
-  const sec = Math.max(0, Math.round((Date.now() - from) / 1000))
-  if (sec < 90) return `${sec}s ago`
-  if (sec < 5400) return `${Math.round(sec / 60)}m ago`
-  if (sec < 172800) return `${Math.round(sec / 3600)}h ago`
-  return `${Math.round(sec / 86400)}d ago`
-}
-
-/**
- * Everything the roster knows right now. The store half is on disk; the live
- * half - facts and unit lists - is memory only and starts empty after a
- * reconnect, which is why a card can legitimately be grey.
- */
 export class Roster {
   private live = new Map<string, HostLive>()
   /**
-   * Bumped whenever `live` or the stored records change. The two table
-   * payloads below are built from nothing else, so between two changes they
-   * are the same answer - and they are asked for on every fast tick, which on
-   * a /24 of machines running a hundred units each means tens of thousands of
-   * rows rebuilt and re-sorted a few times a minute for a table that did not
-   * move.
+   * Bumped whenever `live` or the stored records change. The table payloads are
+   * built from nothing else, so between two changes they are the same answer -
+   * and they are asked for on every fast tick, which on a /24 of machines each
+   * running several instances means thousands of rows rebuilt and re-sorted a
+   * few times a minute for a table that did not move.
    */
   private generation = 0
-  private rows: { generation: number; hosts?: Array<Record<string, unknown>>; units?: Array<Record<string, unknown>> } = {
-    generation: -1
-  }
+  private rows: {
+    generation: number
+    hosts?: Array<Record<string, unknown>>
+    instances?: Array<Record<string, unknown>>
+    net?: Array<Record<string, unknown>>
+  } = { generation: -1 }
 
   constructor(private store: HostStore) {}
 
@@ -201,47 +186,36 @@ export class Roster {
     return this.store.read().hosts
   }
 
+  /** Every machine with a usable agent, for a fan-out that only agents can serve. */
+  agents(): HostLive[] {
+    return [...this.live.values()].filter((live) => agentUsable(live.agent))
+  }
+
   /**
    * Fold one sweep in. A full sweep replaces what was live before - it covered
    * every configured address, so anything missing from it is no longer
-   * configured. `partial` (a sweep cut short by cancel or a module/machine
-   * going away) did not cover every address, so it merges its entries onto
-   * whatever was already live instead - otherwise every address not yet
-   * reached that round would vanish from the wall, the Services table and
-   * bulk targeting until the next sweep completes in full.
-   *
-   * Writes to disk only when a record actually changed, so a sweep every two
-   * minutes does not mean a file write every two minutes.
+   * configured. `partial` (a sweep cut short by cancel or a module going away)
+   * did not cover every address, so it merges onto whatever was already live
+   * instead - otherwise every address not yet reached that round would vanish
+   * from the wall and from bulk targeting until the next full sweep.
    */
-  apply(
-    entries: readonly SweepEntry[],
-    watched: readonly WatchedUnit[],
-    rules: FleetRules,
-    opts?: { partial?: boolean }
-  ): void {
+  apply(entries: readonly SweepEntry[], rules: FleetRules, opts?: { partial?: boolean }): void {
     const nextLive = opts?.partial ? new Map(this.live) : new Map<string, HostLive>()
-    const dirty = this.mergeInto(nextLive, entries, watched, rules)
-    // The document is the store's own cached object, so the roster is already up
-    // to date in memory either way; the disk only hears about it when something
-    // a person would notice changed.
+    const dirty = this.mergeInto(nextLive, entries, rules)
     if (dirty) this.store.persist()
     this.live = nextLive
     this.generation++
   }
 
-  /**
-   * Fold in one machine that was re-read on its own, after an action or a manual
-   * probe, leaving every other card alone.
-   */
-  applyOne(entry: SweepEntry, watched: readonly WatchedUnit[], rules: FleetRules): void {
-    if (this.mergeInto(this.live, [entry], watched, rules)) this.store.persist()
+  /** Fold in one machine re-read on its own, leaving every other card alone. */
+  applyOne(entry: SweepEntry, rules: FleetRules): void {
+    if (this.mergeInto(this.live, [entry], rules)) this.store.persist()
     this.generation++
   }
 
   private mergeInto(
     into: Map<string, HostLive>,
     entries: readonly SweepEntry[],
-    watched: readonly WatchedUnit[],
     rules: FleetRules
   ): boolean {
     const now = Date.now()
@@ -263,7 +237,12 @@ export class Roster {
         lastProbeAt: now,
         reach: entry.reach,
         reachNote: entry.reachMessage,
-        pinned: pinned || existing?.pinned === true
+        pinned: pinned || existing?.pinned === true,
+        agentToken: existing?.agentToken,
+        agentState: entry.agent?.state ?? existing?.agentState,
+        agentVersion: entry.agent?.version ?? existing?.agentVersion,
+        agentCheckedAt: entry.agent ? now : (existing?.agentCheckedAt ?? null),
+        telemetryCursor: existing?.telemetryCursor ?? null
       }
       // lastProbeAt moves on every sweep, and lastSeen on every sweep that
       // reaches the machine - a fleet that is up would mean a disk write every
@@ -271,13 +250,59 @@ export class Roster {
       // rules say not to do. Neither is part of what "changed" means; both are
       // in the record either way, so the next real change - or dispose(),
       // which flushes - writes the current values out with it.
-      const before = existing ? { ...existing, lastProbeAt: 0, lastSeen: 0 } : null
-      const after = { ...record, lastProbeAt: 0, lastSeen: 0 }
-      if (!before || JSON.stringify(before) !== JSON.stringify(after)) dirty = true
+      const strip = (value: HostRecord): Record<string, unknown> => ({
+        ...value,
+        lastProbeAt: 0,
+        lastSeen: 0,
+        agentCheckedAt: 0
+      })
+      if (!existing || JSON.stringify(strip(existing)) !== JSON.stringify(strip(record))) dirty = true
       data.hosts[entry.ip] = record
-      into.set(entry.ip, this.buildLive(entry, record, watched, rules))
+      into.set(entry.ip, this.buildLive(entry, record, rules))
     }
     return dirty
+  }
+
+  private buildLive(entry: SweepEntry, record: HostRecord, rules: FleetRules): HostLive {
+    const problems: string[] = []
+    let status = agentStatus(entry.agent, entry.reach)
+    const agent = entry.agent
+
+    if (entry.reach !== 'ok') {
+      problems.push(entry.reachMessage)
+    }
+    if (agent) {
+      if (agent.state !== 'ready') problems.push(agent.message)
+      for (const instance of agent.instances) {
+        const instanceStatusValue = instanceStatus(instance.state, rules.degradedIsAmber)
+        status = worst(status, instanceStatusValue)
+        if (instanceStatusValue === 'bad') {
+          problems.push(`${instance.displayName} is ${instance.state}`)
+        } else if (instanceStatusValue === 'warn' && instance.state === 'degraded') {
+          const missing = instance.units.filter((unit) => unit.state !== 'running').map((u) => u.name)
+          problems.push(
+            `${instance.displayName} is degraded${missing.length ? ` - ${missing.join(', ')} not running` : ''}`
+          )
+        }
+      }
+      if (agent.net?.online === false) {
+        status = worst(status, 'bad')
+        problems.push('this machine reports no internet connection')
+      }
+    }
+
+    const summary = summaryFor(entry, agent)
+    return {
+      ip: entry.ip,
+      cred: entry.cred,
+      reach: entry.reach,
+      reachMessage: entry.reachMessage,
+      agent,
+      status,
+      summary,
+      note: problems.length ? problems.join(' · ') : noteFor(entry, agent, record),
+      problems
+    }
   }
 
   /** Drop a machine the user does not want to see any more. */
@@ -305,150 +330,82 @@ export class Roster {
     return orphans.length
   }
 
-  private buildLive(
-    entry: SweepEntry,
-    record: HostRecord,
-    watched: readonly WatchedUnit[],
-    rules: FleetRules
-  ): HostLive {
-    const defs = watchedFor(watched, entry.ip, record.label)
-    const shown = entry.facts?.watched ?? []
-    const states: WatchedState[] = defs.map((def) => ({
-      def,
-      state: shown.find((s) => s.unit === def.unit) ?? null
-    }))
-    const problems: string[] = []
-    let status: CardStatus
+  // ------------------------------------------------------------------ tokens
 
-    if (entry.reach !== 'ok') {
-      status = 'bad'
-      problems.push(entry.reachMessage)
-    } else if (!entry.facts) {
-      status = 'unknown'
-      problems.push('Connected, but the sweep returned nothing readable.')
-    } else if (!entry.facts.systemd) {
-      status = 'warn'
-      problems.push('No systemd on this machine, so its services cannot be listed or controlled from here.')
-    } else {
-      status = 'ok'
-      for (const { def, state } of states) {
-        const unitState = unitStatus(state, true, def.severity === 'critical')
-        if (unitState === 'ok') continue
-        const critical = def.severity === 'critical'
-        const level: CardStatus = critical && rules.criticalDownIsRed ? 'bad' : 'warn'
-        status = worst(status, level)
-        problems.push(`${chipLabel(state, def.unit)}${critical ? ' - marked critical' : ''}`)
-      }
-      if (states.length > 0 && !canControl(entry.facts, entry.cred.sudo)) {
-        status = worst(status, 'warn')
-        problems.push(
-          entry.cred.sudo === 'none'
-            ? 'Read-only: this address is set to use no sudo and the account is not root.'
-            : 'Read-only: sudo needs a password here and none is set for this address.'
-        )
-      }
-      if (entry.facts.truncated) {
-        problems.push(`Only the first ${rules.maxUnitsPerHost} service lines were read from this machine.`)
-      }
-    }
-
-    const running = entry.facts?.units.filter((u) => u.active === 'active').length ?? 0
-    const watchedOk = states.filter(({ def, state }) => unitStatus(state, true, def.severity === 'critical') === 'ok')
-      .length
-    const summary =
-      entry.reach !== 'ok'
-        ? relative(record.lastSeen) === 'never'
-          ? 'never reached'
-          : `last seen ${relative(record.lastSeen)}`
-        : states.length > 0
-          ? `${watchedOk}/${states.length} watched`
-          : `${running} running`
-
-    const noteParts = [entry.reachMessage]
-    if (entry.reach === 'ok') {
-      const where = [record.hostname, entry.facts?.os].filter((x) => x).join(' - ')
-      if (where) noteParts.push(where)
-    } else {
-      noteParts.push(`Last reached ${relative(record.lastSeen)}.`)
-    }
-    if (problems.length && entry.reach === 'ok') noteParts.push(...problems)
-
-    return {
-      ip: entry.ip,
-      cred: entry.cred,
-      reach: entry.reach,
-      reachMessage: entry.reachMessage,
-      facts: entry.facts,
-      watched: states,
-      status,
-      summary,
-      note: noteParts.filter((p) => p && p.trim() !== '').join(' '),
-      problems
-    }
+  tokenFor(ip: string): string {
+    return this.store.read().hosts[ip]?.agentToken ?? ''
   }
 
-  /** Every unit known for one machine, watched ones first, one entry per unit name. */
-  unitsFor(ip: string): Array<{ state: UnitState; watched: boolean; severity: 'critical' | 'normal' }> {
-    const live = this.live.get(ip)
-    if (!live) return []
-    const out: Array<{ state: UnitState; watched: boolean; severity: 'critical' | 'normal' }> = []
-    const seen = new Set<string>()
-    for (const { def, state } of live.watched) {
-      seen.add(def.unit)
-      out.push({
-        state: state ?? {
-          unit: def.unit,
-          load: live.facts ? 'not-found' : '',
-          active: '',
-          sub: '',
-          fileState: '',
-          description: def.label ?? ''
-        },
-        watched: true,
-        severity: def.severity
-      })
-    }
-    for (const state of live.facts?.units ?? []) {
-      if (seen.has(state.unit)) continue
-      seen.add(state.unit)
-      out.push({ state, watched: false, severity: 'normal' })
-    }
-    return out
+  /** Remember the token an install printed. Written straight through to disk. */
+  setToken(ip: string, token: string): void {
+    this.store.update((data) => {
+      const record = data.hosts[ip]
+      if (record) record.agentToken = token || undefined
+    })
+    this.store.persist()
+    this.generation++
   }
 
-  /** The `hosts` stream: only what a card draws, capped, so the payload stays small. */
+  cursorFor(ip: string): number | null {
+    return this.store.read().hosts[ip]?.telemetryCursor ?? null
+  }
+
+  /**
+   * Advance a machine's telemetry cursor, only ever forwards.
+   *
+   * Only forwards because a pull that answered with older rows than the cursor
+   * - a clock that stepped back, an agent restored from a backup - would
+   * otherwise make the module re-append everything after it on every tick.
+   */
+  setCursor(ip: string, cursor: number): void {
+    this.store.update((data) => {
+      const record = data.hosts[ip]
+      if (record && (record.telemetryCursor == null || cursor > record.telemetryCursor)) {
+        record.telemetryCursor = cursor
+      }
+    })
+    this.generation++
+  }
+
+  // ------------------------------------------------------------------- views
+
+  /** The `fleet` stream: only what a card draws, capped, so the payload stays small. */
   cards(rules: FleetRules): HostsPayload {
     const hosts: HostCard[] = []
     const counts: FleetCounts = {
       total: 0,
-      online: 0,
-      offline: 0,
-      degraded: 0,
+      ready: 0,
+      noAgent: 0,
+      unreachable: 0,
       unknown: 0,
-      unitsRunning: 0,
-      unitsFailed: 0,
-      watchedDown: 0
+      instancesRunning: 0,
+      instancesDegraded: 0,
+      instancesFailed: 0,
+      hostsOffline: 0
     }
     for (const live of this.live.values()) {
       counts.total++
-      if (live.status === 'ok') counts.online++
-      else if (live.status === 'unknown') counts.unknown++
-      else if (live.reach !== 'ok') counts.offline++
-      else counts.degraded++
+      const state = live.agent?.state
+      if (state === 'ready' || state === 'outdated') counts.ready++
+      else if (state === 'none' || state === 'untrusted') counts.noAgent++
+      else if (state === 'unreachable') counts.unreachable++
+      else counts.unknown++
+      if (live.agent?.net?.online === false) counts.hostsOffline++
 
-      const services: Chip[] = []
-      for (const { def, state } of live.watched) {
-        const status = unitStatus(state, true, def.severity === 'critical')
-        if (status !== 'ok') counts.watchedDown++
-        services.push({ label: chipLabel(state, def.unit), status, pinned: true })
+      const services: StatusChip[] = []
+      if (live.agent && live.agent.state !== 'ready' && live.agent.state !== 'outdated') {
+        services.push(chip(live.agent.state, 'bad'))
+      } else if (live.agent?.state === 'outdated') {
+        services.push(chip(`agent ${live.agent.version ?? '?'}`, 'warn'))
       }
-      const watchedNames = new Set(live.watched.map((w) => w.def.unit))
-      for (const state of live.facts?.units ?? []) {
-        if (state.active === 'active') counts.unitsRunning++
-        if (state.active === 'failed' || state.sub === 'failed') counts.unitsFailed++
-        if (watchedNames.has(state.unit)) continue
-        if (services.length >= rules.cardUnits) continue
-        services.push({ label: chipLabel(state, state.unit), status: unitStatus(state, false, false), pinned: false })
+      for (const instance of live.agent?.instances ?? []) {
+        if (instance.state === 'running') counts.instancesRunning++
+        else if (instance.state === 'degraded') counts.instancesDegraded++
+        else if (instance.state === 'failed') counts.instancesFailed++
+        if (services.length >= rules.cardInstances) continue
+        services.push(
+          chip(`${instance.id} ${instance.state}`, instanceStatus(instance.state, rules.degradedIsAmber))
+        )
       }
       hosts.push({
         id: live.ip,
@@ -466,7 +423,7 @@ export class Roster {
   }
 
   /** Cleared whenever the roster changes; see `generation`. */
-  private rowCache(): { generation: number; hosts?: Array<Record<string, unknown>>; units?: Array<Record<string, unknown>> } {
+  private rowCache(): typeof this.rows {
     if (this.rows.generation !== this.generation) this.rows = { generation: this.generation }
     return this.rows
   }
@@ -477,110 +434,232 @@ export class Roster {
     return (cache.hosts ??= this.buildHostRows())
   }
 
-  /** The Services page: one row per machine and unit, so a bulk action can tick across machines. */
-  unitRows(): Array<Record<string, unknown>> {
-    const cache = this.rowCache()
-    return (cache.units ??= this.buildUnitRows())
-  }
-
   private buildHostRows(): Array<Record<string, unknown>> {
-    const records = this.store.read().hosts
-    const rows = Object.values(records).map((record) => {
-      const live = this.live.get(record.ip)
-      const watchedTotal = live?.watched.length ?? 0
-      const watchedOk =
-        live?.watched.filter(({ def, state }) => unitStatus(state, true, def.severity === 'critical') === 'ok')
-          .length ?? 0
-      return {
-        id: record.ip,
-        ip: record.ip,
+    const data = this.store.read()
+    const out: Array<Record<string, unknown>> = []
+    for (const [ip, record] of Object.entries(data.hosts)) {
+      const live = this.live.get(ip)
+      const agentState = live?.agent?.state ?? record.agentState ?? 'unknown'
+      const instances = live?.agent?.instances ?? []
+      out.push({
+        ip,
         label: record.label ?? '',
         hostname: record.hostname ?? '',
-        os: record.os ?? '',
-        kernel: record.kernel ?? '',
-        status: live?.status ?? 'unknown',
         reach: record.reach,
-        note: live?.note ?? record.reachNote,
-        watched: watchedTotal ? `${watchedOk}/${watchedTotal}` : '—',
-        running: live?.facts?.units.filter((u) => u.active === 'active').length ?? 0,
-        failed: live?.facts?.units.filter((u) => u.active === 'failed' || u.sub === 'failed').length ?? 0,
-        lastSeen: record.lastSeen ?? null,
-        pinned: record.pinned ? 'yes' : '',
+        reachBadges: statusBadges(record.reach === 'ok' ? 'ok' : record.reach),
+        note: record.reachNote,
+        agent: agentState,
+        agentBadges: statusBadges(agentState),
+        agentVersion: live?.agent?.version ?? record.agentVersion ?? '',
+        instanceCount: instances.length,
+        instanceBadges: countBadges([
+          { label: 'running', count: instances.filter((i) => i.state === 'running').length, color: BADGE.good },
+          { label: 'degraded', count: instances.filter((i) => i.state === 'degraded').length, color: BADGE.warn },
+          { label: 'failed', count: instances.filter((i) => i.state === 'failed').length, color: BADGE.bad }
+        ]),
+        publicIp: live?.agent?.net?.publicIp ?? '',
+        latencyMs: live?.agent?.net?.latencyMs ?? null,
+        // Raw epoch ms: the spec's `time` format renders it in the viewer's own
+        // locale, and a module that pre-formatted it would bake the server's in.
+        lastSeen: record.lastSeen,
+        lastProbeAt: record.lastProbeAt,
+        firstSeen: record.firstSeen || null,
+        pinned: record.pinned,
+        hasToken: Boolean(record.agentToken),
         username: live?.cred.username ?? '',
-        port: live?.cred.port ?? 22,
-        sudo: live?.cred.sudo ?? 'none'
-      }
-    })
-    rows.sort((a, b) => compareIp(String(a.ip), String(b.ip)))
-    return rows
+        port: live?.cred.port ?? 22
+      })
+    }
+    out.sort((a, b) => compareIp(String(a.ip), String(b.ip)))
+    return out
   }
 
-  private buildUnitRows(): Array<Record<string, unknown>> {
+  /** The Services page: one row per machine and instance, so a bulk action can tick across machines. */
+  instanceRows(rules: FleetRules): Array<Record<string, unknown>> {
+    const cache = this.rowCache()
+    return (cache.instances ??= this.buildInstanceRows(rules))
+  }
+
+  private buildInstanceRows(rules: FleetRules): Array<Record<string, unknown>> {
     const out: Array<Record<string, unknown>> = []
     for (const live of this.live.values()) {
-      for (const { state, watched, severity } of this.unitsFor(live.ip)) {
+      for (const instance of live.agent?.instances ?? []) {
+        const status = instanceStatus(instance.state, rules.degradedIsAmber)
         out.push({
-          id: `${live.ip}|${state.unit}`,
+          // `<ip>|<id>` is the row's identity, and what a bulk action gets a
+          // list of. A table needs one unique key per row and neither half is
+          // unique on its own.
+          key: `${live.ip}|${instance.id}`,
           ip: live.ip,
           label: live.cred.label ?? '',
-          unit: state.unit,
-          watched: watched ? 'yes' : '',
-          severity: watched ? severity : '',
-          status: unitStatus(state, watched, severity === 'critical'),
-          health: healthLabel(state),
-          load: state.load,
-          active: state.active,
-          sub: state.sub,
-          fileState: state.fileState,
-          description: state.description
+          template: instance.id,
+          displayName: instance.displayName,
+          kind: instance.kind,
+          state: instance.state,
+          stateBadges: statusBadges(instance.state),
+          tone: status,
+          units: instance.units.map((unit) => `${unit.name}=${unit.state}`).join(', '),
+          unitBadges: countBadges([
+            { label: 'running', count: instance.units.filter((u) => u.state === 'running').length, color: BADGE.good },
+            {
+              label: 'stopped',
+              count: instance.units.filter((u) => u.state !== 'running').length,
+              color: BADGE.warn
+            }
+          ]),
+          restarts: instance.units.reduce((sum, unit) => sum + (unit.restartCount ?? 0), 0),
+          hasCredentials: instance.hasCredentials,
+          updatedAt: instance.updatedAt ?? null
         })
       }
     }
     out.sort(
       (a, b) =>
-        STATUS_WEIGHT[a.status as CardStatus] - STATUS_WEIGHT[b.status as CardStatus] ||
-        compareIp(String(a.ip), String(b.ip)) ||
-        String(a.unit).localeCompare(String(b.unit))
+        compareIp(String(a.ip), String(b.ip)) || String(a.template).localeCompare(String(b.template))
     )
     return out
   }
 
-  /** The drawer's key/value panel for one machine. */
+  /**
+   * The Fleet page's network view: one row per agent, carrying the public
+   * address it sees itself as.
+   *
+   * `sharesIp` is computed here rather than in the spec because a block cannot
+   * count its own rows. It is what surfaces the collision these platforms
+   * actually care about - Honeygain's terms forbid several devices behind one
+   * connection, so two agents reporting one address running one template is a
+   * thing the user needs told, not a thing they should have to notice.
+   */
+  netRows(): Array<Record<string, unknown>> {
+    const cache = this.rowCache()
+    return (cache.net ??= this.buildNetRows())
+  }
+
+  private buildNetRows(): Array<Record<string, unknown>> {
+    const live = [...this.live.values()].filter((entry) => entry.agent?.net)
+    const byIp = new Map<string, HostLive[]>()
+    for (const entry of live) {
+      const publicIp = entry.agent?.net?.publicIp ?? ''
+      if (!publicIp) continue
+      const bucket = byIp.get(publicIp)
+      if (bucket) bucket.push(entry)
+      else byIp.set(publicIp, [entry])
+    }
+
+    const out: Array<Record<string, unknown>> = []
+    for (const entry of live) {
+      const net = entry.agent?.net
+      const publicIp = net?.publicIp ?? ''
+      const sharing = publicIp ? (byIp.get(publicIp)?.length ?? 1) : 1
+      const templates = new Set((entry.agent?.instances ?? []).map((instance) => instance.id))
+      const clashes = publicIp
+        ? (byIp.get(publicIp) ?? [])
+            .filter((other) => other.ip !== entry.ip)
+            .flatMap((other) => (other.agent?.instances ?? []).map((instance) => instance.id))
+            .filter((id) => templates.has(id))
+        : []
+      const unique = [...new Set(clashes)]
+      out.push({
+        ip: entry.ip,
+        label: entry.cred.label ?? '',
+        publicIp: publicIp || '(not measured yet)',
+        online: net?.online,
+        onlineBadges: statusBadges(net?.online === true ? 'online' : net?.online === false ? 'offline' : ''),
+        latencyMs: net?.latencyMs ?? null,
+        source: net?.lastIpSource ?? '',
+        sharesIp: sharing,
+        clashes: unique.join(', '),
+        clashBadges: unique.length
+          ? [{ label: `${unique.length} shared`, color: BADGE.warn }]
+          : [],
+        tone: unique.length ? 'warn' : 'ok'
+      })
+    }
+    out.sort(
+      (a, b) =>
+        String(a.publicIp).localeCompare(String(b.publicIp)) ||
+        compareIp(String(a.ip), String(b.ip))
+    )
+    return out
+  }
+
+  /** One machine, for a card's drawer. */
   inspect(ip: string): Record<string, unknown> | null {
     const record = this.store.read().hosts[ip]
     const live = this.live.get(ip)
     if (!record && !live) return null
-    const facts = live?.facts
+    const agent = live?.agent
     return {
       ip,
-      label: record?.label ?? live?.cred.label ?? '',
+      label: record?.label ?? '',
       hostname: record?.hostname ?? '',
-      os: record?.os ?? '',
-      kernel: record?.kernel ?? '',
-      status: live?.status ?? 'unknown',
       reach: record?.reach ?? 'unknown',
-      note: live?.note ?? record?.reachNote ?? '',
+      reachBadges: statusBadges(record?.reach === 'ok' ? 'ok' : (record?.reach ?? '')),
+      note: record?.reachNote ?? '',
+      agent: agent?.state ?? record?.agentState ?? 'unknown',
+      agentBadges: statusBadges(agent?.state ?? record?.agentState ?? ''),
+      agentVersion: agent?.version ?? record?.agentVersion ?? '',
+      agentMessage: agent?.message ?? '',
+      hasToken: Boolean(record?.agentToken),
+      online: agent?.net?.online,
+      publicIp: agent?.net?.publicIp ?? '',
+      latencyMs: agent?.net?.latencyMs ?? null,
+      pingTarget: agent?.net?.lastPingTarget ?? '',
+      ipSource: agent?.net?.lastIpSource ?? '',
+      instanceCount: agent?.instances.length ?? 0,
+      firstSeen: record?.firstSeen || null,
+      lastSeen: record?.lastSeen ?? null,
+      lastProbeAt: record?.lastProbeAt ?? null,
       username: live?.cred.username ?? '',
       port: live?.cred.port ?? 22,
-      auth: live?.cred.auth ?? '',
-      sudo: live?.cred.sudo ?? 'none',
-      controllable: facts ? (canControl(facts, live?.cred.sudo ?? 'none') ? 'yes' : 'no') : 'unknown',
-      packageManager: facts?.pkg || 'unknown',
-      uptimeSec: facts?.uptimeSec ?? 0,
-      running: facts?.units.filter((u) => u.active === 'active').length ?? 0,
-      failed: facts?.units.filter((u) => u.active === 'failed' || u.sub === 'failed').length ?? 0,
-      firstSeen: record?.firstSeen ?? null,
-      lastSeen: record?.lastSeen ?? null,
-      lastProbeAt: record?.lastProbeAt ?? null
+      problems: live?.problems ?? []
     }
   }
 
-  /** Every machine currently in the roster that a rule still reaches, for a bulk action. */
+  /** Instances of one machine, for the drawer's table. */
+  instancesOf(ip: string): Array<Record<string, unknown>> {
+    const live = this.live.get(ip)
+    if (!live?.agent) return []
+    return live.agent.instances.map((instance) => ({
+      key: `${ip}|${instance.id}`,
+      template: instance.id,
+      displayName: instance.displayName,
+      state: instance.state,
+      stateBadges: statusBadges(instance.state),
+      units: instance.units.map((unit) => `${unit.name}=${unit.state}`).join(', '),
+      hasCredentials: instance.hasCredentials,
+      ip
+    }))
+  }
+
+  /** Machines a fan-out may act on, given the rules the user typed. */
   controllable(targets: readonly TargetRule[]): HostLive[] {
-    const out: HostLive[] = []
-    for (const live of this.live.values()) {
-      if (resolveCredential(live.ip, targets)) out.push(live)
-    }
-    return out.sort((a, b) => compareIp(a.ip, b.ip))
+    return [...this.live.values()].filter((live) => resolveCredential(live.ip, targets) != null)
   }
 }
+
+function summaryFor(entry: SweepEntry, agent: AgentInfo | null): string {
+  if (!agent) return entry.reach === 'ok' ? 'not checked yet' : entry.reachMessage
+  if (agent.state === 'none') return 'no agent'
+  if (agent.state === 'untrusted') return 'agent, no token'
+  if (agent.state === 'unreachable') return 'unreachable'
+  const running = agent.instances.filter((instance) => instance.state === 'running').length
+  const total = agent.instances.length
+  if (!total) return 'agent ready, nothing deployed'
+  return `${running}/${total} running`
+}
+
+function noteFor(entry: SweepEntry, agent: AgentInfo | null, record: HostRecord): string {
+  if (agent?.state === 'ready' && agent.instances.length) {
+    const ip = agent.net?.publicIp
+    return ip ? `Public address ${ip}.` : 'Everything this machine runs is healthy.'
+  }
+  if (agent?.state === 'ready') {
+    return 'The agent is running and has nothing deployed. Use Services → Deploy to give it something.'
+  }
+  if (record.lastSeen) return `Last reached ${new Date(record.lastSeen).toISOString()}.`
+  return entry.reachMessage
+}
+
+/** Re-exported so pages and tests share one vocabulary. */
+export { statusTone }

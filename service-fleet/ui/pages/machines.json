@@ -1,0 +1,660 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "connected"
+        },
+        "op": "eq",
+        "value": false
+      },
+      "blocks": [
+        {
+          "type": "section",
+          "title": "Not connected to a machine",
+          "blocks": [
+            {
+              "type": "note",
+              "title": "This module works through a machine you are connected to",
+              "lines": [
+                "It reaches the rest of your network from there: SSH to find machines and install the agent, then HTTP to everything the agent runs.",
+                "Connect to a machine on the same network as the fleet - the machine list is in the sidebar - and this page fills in by itself."
+              ],
+              "tone": "info"
+            }
+          ]
+        }
+      ],
+      "else": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "problem"
+            },
+            "op": "exists"
+          },
+          "blocks": [
+            {
+              "type": "section",
+              "title": "This machine cannot reach the fleet",
+              "blocks": [
+                {
+                  "type": "keyValue",
+                  "source": {
+                    "kind": "stream",
+                    "event": "capabilities"
+                  },
+                  "rows": [
+                    {
+                      "key": "sshVersion",
+                      "label": "SSH client"
+                    },
+                    {
+                      "key": "problem",
+                      "label": "Problem"
+                    }
+                  ]
+                },
+                {
+                  "type": "note",
+                  "title": "What to do",
+                  "lines": [
+                    "Something the module cannot work without is missing on the machine you are connected to, so nothing has been read and no figure below would be real.",
+                    "Module settings lists every tool it looks for. Install the missing ones there, or connect to a machine that already has them."
+                  ],
+                  "tone": "warning"
+                },
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Check again",
+                      "method": "sweepNow"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "else": [
+            {
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "warning"
+                },
+                "op": "exists"
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Working, with something worth knowing",
+                  "lines": [
+                    "The fleet is being read, and one thing about the machine you are connected to makes it slower or less precise than it could be. Module settings names it."
+                  ],
+                  "tone": "warning"
+                }
+              ]
+            },
+            {
+              "type": "subnav",
+              "items": [
+                {
+                  "id": "discovered",
+                  "label": "Discovered",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What a row means",
+                          "lines": [
+                            "SSH says whether a machine is there at all. Agent says whether this app can manage it.",
+                            "\"no-agent\" is the one you can act on in a click: the machine answered, and the agent simply is not installed. \"unreachable\" means nothing answered, and \"untrusted\" means an agent is running that this app has no working token for - reinstalling is the fix for that one."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Machines",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "agentRows",
+                            "intervalKey": "service-fleet"
+                          },
+                          "columns": [
+                            {
+                              "key": "ip",
+                              "label": "Address"
+                            },
+                            {
+                              "key": "hostname",
+                              "label": "Hostname"
+                            },
+                            {
+                              "key": "label",
+                              "label": "Label"
+                            },
+                            {
+                              "key": "reachBadges",
+                              "label": "SSH",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "agentBadges",
+                              "label": "Agent",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "agent",
+                              "label": "Agent state"
+                            },
+                            {
+                              "key": "reach",
+                              "label": "SSH result"
+                            },
+                            {
+                              "key": "agentVersion",
+                              "label": "Version"
+                            },
+                            {
+                              "key": "instanceBadges",
+                              "label": "Services",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "publicIp",
+                              "label": "Public address"
+                            },
+                            {
+                              "key": "lastSeen",
+                              "label": "Last reached",
+                              "format": "time"
+                            }
+                          ],
+                          "rowKey": "ip",
+                          "selectable": true,
+                          "sortDefault": {
+                            "key": "ip",
+                            "dir": "asc"
+                          },
+                          "filterKeys": [
+                            "ip",
+                            "hostname",
+                            "label",
+                            "agent",
+                            "reach",
+                            "publicIp"
+                          ],
+                          "groupModes": [
+                            {
+                              "id": "agent",
+                              "label": "By agent state",
+                              "key": "agent"
+                            },
+                            {
+                              "id": "reach",
+                              "label": "By SSH result",
+                              "key": "reach"
+                            }
+                          ],
+                          "rowActions": [
+                            {
+                              "label": "Probe",
+                              "method": "hostProbe",
+                              "argsFromRow": [
+                                "ip"
+                              ]
+                            },
+                            {
+                              "label": "Forget",
+                              "method": "hostForget",
+                              "argsFromRow": [
+                                "ip"
+                              ],
+                              "confirm": "Drop this machine from the roster? It returns on the next sweep if a rule still covers it.",
+                              "kind": "danger"
+                            }
+                          ],
+                          "bulkActions": [
+                            {
+                              "label": "Forget",
+                              "method": "hostForget",
+                              "confirm": "Drop the ticked machines from the roster?",
+                              "kind": "danger"
+                            }
+                          ],
+                          "rowDetail": [
+                            {
+                              "type": "section",
+                              "title": "What was found",
+                              "blocks": [
+                                {
+                                  "type": "keyValue",
+                                  "source": {
+                                    "kind": "invoke",
+                                    "method": "hostInspect",
+                                    "args": [
+                                      "$row.ip"
+                                    ]
+                                  },
+                                  "rows": [
+                                    {
+                                      "key": "agentBadges",
+                                      "label": "Agent",
+                                      "format": "badges"
+                                    },
+                                    {
+                                      "key": "agentMessage",
+                                      "label": "Agent says"
+                                    },
+                                    {
+                                      "key": "hasToken",
+                                      "label": "Token stored"
+                                    },
+                                    {
+                                      "key": "reachBadges",
+                                      "label": "SSH",
+                                      "format": "badges"
+                                    },
+                                    {
+                                      "key": "note",
+                                      "label": "Note"
+                                    },
+                                    {
+                                      "key": "lastProbeAt",
+                                      "label": "Last probed",
+                                      "format": "time"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "section",
+                              "title": "Install the agent here",
+                              "blocks": [
+                                {
+                                  "type": "conditional",
+                                  "when": {
+                                    "source": {
+                                      "kind": "stream",
+                                      "event": "ui",
+                                      "path": "hintsOn"
+                                    },
+                                    "op": "eq",
+                                    "value": true
+                                  },
+                                  "blocks": [
+                                    {
+                                      "type": "note",
+                                      "title": "What this does",
+                                      "lines": [
+                                        "The machine downloads the agent from the release, checks it against a SHA-256, and runs its installer. Nothing is installed if the hash does not match.",
+                                        "The installer prints a token once. This app reads it out of that output and stores it, which is what lets it manage the machine straight afterwards."
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "checkForm",
+                                  "checkMethod": "agentInstallCheck",
+                                  "applyMethod": "agentInstallApply",
+                                  "fields": [
+                                    {
+                                      "key": "machines",
+                                      "label": "Machines",
+                                      "input": "text",
+                                      "initialFromScope": "ip"
+                                    },
+                                    {
+                                      "key": "version",
+                                      "label": "Agent version",
+                                      "input": "text",
+                                      "placeholder": "leave empty for the version this module ships"
+                                    },
+                                    {
+                                      "key": "url",
+                                      "label": "Download URL",
+                                      "input": "text",
+                                      "placeholder": "leave empty to use the official release"
+                                    },
+                                    {
+                                      "key": "sha256",
+                                      "label": "SHA-256 of that file",
+                                      "input": "text",
+                                      "placeholder": "leave empty to use the hash this module was built with"
+                                    }
+                                  ],
+                                  "checkLabel": "Check",
+                                  "applyLabel": "Install"
+                                }
+                              ]
+                            }
+                          ],
+                          "emptyText": "Nothing has been found yet. Add an address or a range in Module settings, then sweep."
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Install the agent",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "What each field means",
+                              "lines": [
+                                "Machines - the addresses to install on. They have to answer over SSH, and the login has to be root or have sudo.",
+                                "Agent version - which release to install. Leave it empty for the version this module was built against, which is the one it is tested with.",
+                                "Download URL - where to fetch it from. Leave empty for the official release for that version. Set it to install from somewhere else, such as a mirror inside your network.",
+                                "SHA-256 - the hash the download must match. Leave empty to use the one compiled into this module. It is never optional: if this module has no hash and you give none, the install is refused rather than done unverified."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "checkForm",
+                          "checkMethod": "agentInstallCheck",
+                          "applyMethod": "agentInstallApply",
+                          "fields": [
+                            {
+                              "key": "machines",
+                              "label": "Machines",
+                              "input": "select",
+                              "multiple": true,
+                              "optionsFrom": {
+                                "kind": "invoke",
+                                "method": "selectOptions",
+                                "args": [
+                                  "hosts"
+                                ]
+                              }
+                            },
+                            {
+                              "key": "version",
+                              "label": "Agent version",
+                              "input": "text",
+                              "placeholder": "leave empty for the version this module ships"
+                            },
+                            {
+                              "key": "url",
+                              "label": "Download URL",
+                              "input": "text",
+                              "placeholder": "leave empty to use the official release"
+                            },
+                            {
+                              "key": "sha256",
+                              "label": "SHA-256 of that file",
+                              "input": "text",
+                              "placeholder": "leave empty to use the hash this module was built with"
+                            }
+                          ],
+                          "checkLabel": "Check the plan",
+                          "applyLabel": "Install on these machines"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Remove the agent",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "What each field means",
+                              "lines": [
+                                "Machines - which to remove it from.",
+                                "Also delete its configuration and data - removes the token, the platform credentials it was storing and the daily rows it had not been asked for yet. Leave it off to be able to reinstall without setting everything up again.",
+                                "Neither option touches the containers or units the agent installed. Removing the manager is not removing what it manages."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "checkForm",
+                          "checkMethod": "agentUninstallCheck",
+                          "applyMethod": "agentUninstallApply",
+                          "fields": [
+                            {
+                              "key": "machines",
+                              "label": "Machines",
+                              "input": "select",
+                              "multiple": true,
+                              "optionsFrom": {
+                                "kind": "invoke",
+                                "method": "selectOptions",
+                                "args": [
+                                  "hosts"
+                                ]
+                              }
+                            },
+                            {
+                              "key": "purge",
+                              "label": "Also delete its configuration and data",
+                              "input": "checkbox"
+                            }
+                          ],
+                          "checkLabel": "Check",
+                          "applyLabel": "Remove the agent",
+                          "kind": "danger"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "sweep",
+                  "label": "Sweep",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "How a sweep works",
+                          "lines": [
+                            "Every address in every enabled rule is asked over SSH, in parallel, from the machine you are connected to. That is what finds machines and what tells \"nothing is here\" from \"something is here and I cannot log in\".",
+                            "Whatever answers is then asked over HTTP about its agent. That second half is cheap, which is why the fleet can be re-read often without being expensive."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Sweep",
+                      "blocks": [
+                        {
+                          "type": "keyValue",
+                          "source": {
+                            "kind": "stream",
+                            "event": "sweep"
+                          },
+                          "rows": [
+                            {
+                              "key": "state",
+                              "label": "State"
+                            },
+                            {
+                              "key": "message",
+                              "label": "Last result"
+                            },
+                            {
+                              "key": "done",
+                              "label": "Done"
+                            },
+                            {
+                              "key": "total",
+                              "label": "Planned"
+                            },
+                            {
+                              "key": "startedAt",
+                              "label": "Started",
+                              "format": "time"
+                            },
+                            {
+                              "key": "finishedAt",
+                              "label": "Finished",
+                              "format": "time"
+                            },
+                            {
+                              "key": "durationMs",
+                              "label": "Took",
+                              "format": "duration"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [
+                            {
+                              "label": "Sweep now",
+                              "method": "sweepNow"
+                            },
+                            {
+                              "label": "Cancel",
+                              "method": "sweepCancel"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Telemetry collection",
+                      "blocks": [
+                        {
+                          "type": "conditional",
+                          "when": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "ui",
+                              "path": "hintsOn"
+                            },
+                            "op": "eq",
+                            "value": true
+                          },
+                          "blocks": [
+                            {
+                              "type": "note",
+                              "title": "What this is",
+                              "lines": [
+                                "Each agent keeps its own daily figures for over a year. This app asks for whatever is newer than the last row it stored, which is why being switched off for a week costs nothing - the next collection fetches the week."
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "keyValue",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "collectSummary",
+                            "intervalKey": "service-fleet"
+                          },
+                          "rows": [
+                            {
+                              "key": "message",
+                              "label": "Last collection"
+                            },
+                            {
+                              "key": "machines",
+                              "label": "Agents asked"
+                            },
+                            {
+                              "key": "dailyRows",
+                              "label": "Daily rows kept"
+                            },
+                            {
+                              "key": "eventRows",
+                              "label": "Incidents kept"
+                            },
+                            {
+                              "key": "failed",
+                              "label": "Agents that did not answer"
+                            },
+                            {
+                              "key": "t",
+                              "label": "When",
+                              "format": "time"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [
+                            {
+                              "label": "Collect now",
+                              "method": "collectNow"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

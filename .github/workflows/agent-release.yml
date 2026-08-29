@@ -1,0 +1,89 @@
+name: agent-release
+on:
+  push:
+    tags: ['agent-v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # agent/pyproject.toml is the only place the agent's version lives - the
+      # module compiles that version and its hash into main/agent/manifest.ts,
+      # so the tag has to agree with it rather than the other way round.
+      - name: Verify tag matches the agent version
+        run: |
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' agent/pyproject.toml | head -1)"
+          test "$GITHUB_REF_NAME" = "agent-v$VERSION" || {
+            echo "tag $GITHUB_REF_NAME does not match agent/pyproject.toml version $VERSION" >&2
+            exit 1
+          }
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e './agent[dev]'
+      # A tag publishes straight from this job, so everything a pull request
+      # would have been stopped by has to stop it here too.
+      - run: python -m pytest agent/tests -q
+      # The installer is the one file that runs as root on somebody else's
+      # machine. Parsing it is the cheapest check there is and there is no
+      # excuse for shipping one that does not.
+      - name: Check the installer parses
+        run: bash -n agent/install/agent-install.sh
+      - run: npm ci
+      - run: npm run agent:pack
+      # Packing is byte-reproducible, so packing twice has to produce the same
+      # bytes. If it does not, the sha256 the module compiles in is a property
+      # of one build rather than of the source, and checking it on a target
+      # machine would prove nothing.
+      - name: Verify the archive is reproducible
+        run: |
+          set -euo pipefail
+          node scripts/package-agent.mjs /tmp/again
+          A="$(sha256sum dist/*.tar.gz | cut -d' ' -f1)"
+          B="$(sha256sum /tmp/again/*.tar.gz | cut -d' ' -f1)"
+          test "$A" = "$B" || { echo "packing is not reproducible: $A vs $B" >&2; exit 1; }
+      - name: Publish
+        run: |
+          set -euo pipefail
+          TARS=(dist/*.tar.gz)
+          test "${#TARS[@]}" -eq 1 || { echo "expected exactly one tarball, got ${TARS[*]}" >&2; exit 1; }
+          SHA="$(cut -d' ' -f1 < "${TARS[0]}.sha256")"
+          {
+            echo 'The agent the Services module installs on each machine in a fleet.'
+            echo
+            echo 'Install it by hand with:'
+            echo
+            echo '```bash'
+            echo "curl -fsSL <this asset's URL> -o boredagent.tar.gz"
+            echo "tar xzf boredagent.tar.gz && cd boredagent-*"
+            echo 'sudo bash install/agent-install.sh'
+            echo '```'
+            echo
+            echo 'or let the Services module do it for every machine at once.'
+            echo
+            echo "sha256 of \`$(basename "${TARS[0]}")\`:"
+            echo
+            echo '```'
+            echo "$SHA"
+            echo '```'
+            echo
+            echo 'That hash is compiled into the module and checked on each target'
+            echo 'machine before the archive is unpacked.'
+          } > notes.md
+          # --latest=false is not optional. The app finds a *module* by asking
+          # for this repository's releases/latest and taking the single zip
+          # attached to it; an agent release that claimed latest would hide the
+          # module from every install.
+          gh release create "$GITHUB_REF_NAME" "${TARS[0]}" "${TARS[0]}.sha256" \
+            --title "BoredAgent ${GITHUB_REF_NAME#agent-v}" \
+            --notes-file notes.md \
+            --latest=false
+        env:
+          GH_TOKEN: ${{ github.token }}

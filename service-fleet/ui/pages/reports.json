@@ -1,0 +1,619 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "connected"
+        },
+        "op": "eq",
+        "value": false
+      },
+      "blocks": [
+        {
+          "type": "section",
+          "title": "Not connected to a machine",
+          "blocks": [
+            {
+              "type": "note",
+              "title": "This module works through a machine you are connected to",
+              "lines": [
+                "It reaches the rest of your network from there: SSH to find machines and install the agent, then HTTP to everything the agent runs.",
+                "Connect to a machine on the same network as the fleet - the machine list is in the sidebar - and this page fills in by itself."
+              ],
+              "tone": "info"
+            }
+          ]
+        }
+      ],
+      "else": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "problem"
+            },
+            "op": "exists"
+          },
+          "blocks": [
+            {
+              "type": "section",
+              "title": "This machine cannot reach the fleet",
+              "blocks": [
+                {
+                  "type": "keyValue",
+                  "source": {
+                    "kind": "stream",
+                    "event": "capabilities"
+                  },
+                  "rows": [
+                    {
+                      "key": "sshVersion",
+                      "label": "SSH client"
+                    },
+                    {
+                      "key": "problem",
+                      "label": "Problem"
+                    }
+                  ]
+                },
+                {
+                  "type": "note",
+                  "title": "What to do",
+                  "lines": [
+                    "Something the module cannot work without is missing on the machine you are connected to, so nothing has been read and no figure below would be real.",
+                    "Module settings lists every tool it looks for. Install the missing ones there, or connect to a machine that already has them."
+                  ],
+                  "tone": "warning"
+                },
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Check again",
+                      "method": "sweepNow"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "else": [
+            {
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "warning"
+                },
+                "op": "exists"
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Working, with something worth knowing",
+                  "lines": [
+                    "The fleet is being read, and one thing about the machine you are connected to makes it slower or less precise than it could be. Module settings names it."
+                  ],
+                  "tone": "warning"
+                }
+              ]
+            },
+            {
+              "type": "subnav",
+              "items": [
+                {
+                  "id": "bandwidth",
+                  "label": "Bandwidth",
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "Where these figures come from, and what they are worth",
+                      "lines": [
+                        "Every agent measures its own services once a minute and folds each day into one row. This app collects those rows and keeps them for over a year, so this is history the agents kept rather than something sampled from here.",
+                        "A row marked \"floor\" is a lower bound, not a total. Containers have exact counters; a service running directly on the host does not, so its figure is summed from socket counters and misses connections that open and close between two samples. It is labelled rather than quietly presented as exact."
+                      ],
+                      "tone": "info"
+                    },
+                    {
+                      "type": "section",
+                      "title": "Daily traffic",
+                      "blocks": [
+                        {
+                          "type": "chart",
+                          "title": "Fleet traffic per day",
+                          "kind": "bar",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportBandwidthSeries",
+                            "args": [
+                              30
+                            ]
+                          },
+                          "series": [
+                            {
+                              "key": "rx",
+                              "label": "Received",
+                              "color": "download"
+                            },
+                            {
+                              "key": "tx",
+                              "label": "Sent",
+                              "color": "upload"
+                            }
+                          ],
+                          "format": "bytes",
+                          "stacked": true,
+                          "window": 2592000
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Last 90 days",
+                      "blocks": [
+                        {
+                          "type": "chart",
+                          "title": "Fleet traffic per day",
+                          "kind": "bar",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportBandwidthSeries",
+                            "args": [
+                              90
+                            ]
+                          },
+                          "series": [
+                            {
+                              "key": "rx",
+                              "label": "Received",
+                              "color": "download"
+                            },
+                            {
+                              "key": "tx",
+                              "label": "Sent",
+                              "color": "upload"
+                            }
+                          ],
+                          "format": "bytes",
+                          "stacked": true,
+                          "window": 7776000
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Per machine and service",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportBandwidth",
+                            "args": [
+                              30
+                            ]
+                          },
+                          "columns": [
+                            {
+                              "key": "day",
+                              "label": "Day"
+                            },
+                            {
+                              "key": "ip",
+                              "label": "Machine"
+                            },
+                            {
+                              "key": "label",
+                              "label": "Label"
+                            },
+                            {
+                              "key": "template",
+                              "label": "Service"
+                            },
+                            {
+                              "key": "unit",
+                              "label": "Unit"
+                            },
+                            {
+                              "key": "rx",
+                              "label": "Received",
+                              "format": "bytes",
+                              "align": "right"
+                            },
+                            {
+                              "key": "tx",
+                              "label": "Sent",
+                              "format": "bytes",
+                              "align": "right"
+                            },
+                            {
+                              "key": "bytes",
+                              "label": "Total",
+                              "format": "bytes",
+                              "align": "right"
+                            },
+                            {
+                              "key": "partialBadges",
+                              "label": "Exactness",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "uptimePct",
+                              "label": "Up %",
+                              "align": "right"
+                            },
+                            {
+                              "key": "restarts",
+                              "label": "Restarts",
+                              "align": "right"
+                            }
+                          ],
+                          "rowKey": "key",
+                          "sortDefault": {
+                            "key": "day",
+                            "dir": "desc"
+                          },
+                          "filterKeys": [
+                            "ip",
+                            "label",
+                            "template",
+                            "unit",
+                            "day"
+                          ],
+                          "groupModes": [
+                            {
+                              "id": "machine",
+                              "label": "By machine",
+                              "key": "ip"
+                            },
+                            {
+                              "id": "template",
+                              "label": "By service",
+                              "key": "template"
+                            },
+                            {
+                              "id": "day",
+                              "label": "By day",
+                              "key": "day"
+                            }
+                          ],
+                          "emptyText": "Nothing collected yet. Agents write one row per day, so the first appears after a day of running - or immediately if an agent already had history when it was found."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "uptime",
+                  "label": "Uptime",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What uptime means here",
+                          "lines": [
+                            "The share of the day an agent could reach the internet, measured by its own probe once a second against four different operators.",
+                            "Time the agent was not running at all counts as neither up nor down - it is recorded as a gap, on the Incidents tab, rather than silently counted as perfect uptime."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Fleet",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "meter",
+                          "label": "Average online time",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportUptimeSummary",
+                            "args": [
+                              30
+                            ],
+                            "path": "onlinePct"
+                          },
+                          "format": "pct",
+                          "max": 100
+                        },
+                        {
+                          "type": "keyValue",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportUptimeSummary",
+                            "args": [
+                              30
+                            ]
+                          },
+                          "rows": [
+                            {
+                              "key": "machines",
+                              "label": "Machines with history"
+                            },
+                            {
+                              "key": "days",
+                              "label": "Window (days)"
+                            },
+                            {
+                              "key": "incidents",
+                              "label": "Incidents recorded"
+                            },
+                            {
+                              "key": "message",
+                              "label": "Summary"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Per machine and day",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportUptime",
+                            "args": [
+                              30
+                            ]
+                          },
+                          "columns": [
+                            {
+                              "key": "day",
+                              "label": "Day"
+                            },
+                            {
+                              "key": "ip",
+                              "label": "Machine"
+                            },
+                            {
+                              "key": "label",
+                              "label": "Label"
+                            },
+                            {
+                              "key": "onlineBadges",
+                              "label": "Internet",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "onlinePct",
+                              "label": "Online %",
+                              "align": "right"
+                            },
+                            {
+                              "key": "latencyP50",
+                              "label": "Latency p50",
+                              "align": "right"
+                            },
+                            {
+                              "key": "latencyP95",
+                              "label": "Latency p95",
+                              "align": "right"
+                            },
+                            {
+                              "key": "latencyMax",
+                              "label": "Worst",
+                              "align": "right"
+                            },
+                            {
+                              "key": "publicIps",
+                              "label": "Public addresses"
+                            },
+                            {
+                              "key": "incidents",
+                              "label": "Incidents",
+                              "align": "right"
+                            }
+                          ],
+                          "rowKey": "key",
+                          "sortDefault": {
+                            "key": "day",
+                            "dir": "desc"
+                          },
+                          "filterKeys": [
+                            "ip",
+                            "label",
+                            "day",
+                            "publicIps"
+                          ],
+                          "groupModes": [
+                            {
+                              "id": "machine",
+                              "label": "By machine",
+                              "key": "ip"
+                            },
+                            {
+                              "id": "day",
+                              "label": "By day",
+                              "key": "day"
+                            }
+                          ],
+                          "emptyText": "No uptime history yet. Each agent writes one row per day, so the first appears after a day of running."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "incidents",
+                  "label": "Incidents",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What is recorded",
+                          "lines": [
+                            "link_down and link_up - the machine lost or regained its internet connection.",
+                            "ip_changed - its public address moved, which matters because most of these services tie an account to an address.",
+                            "latency_spike - one episode of unusually high latency, with its peak and how long it lasted. One row per episode, not one per slow second.",
+                            "unit_down and unit_crash - a service stopped, and whether it exited cleanly or not.",
+                            "agent_gap - the agent itself was not running. That time is excluded from uptime rather than counted as good."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Incidents",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportIncidents",
+                            "args": [
+                              7
+                            ]
+                          },
+                          "columns": [
+                            {
+                              "key": "t",
+                              "label": "When",
+                              "format": "datetime"
+                            },
+                            {
+                              "key": "ip",
+                              "label": "Machine"
+                            },
+                            {
+                              "key": "label",
+                              "label": "Label"
+                            },
+                            {
+                              "key": "kindBadges",
+                              "label": "Kind",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "kind",
+                              "label": "Kind name"
+                            },
+                            {
+                              "key": "template",
+                              "label": "Service"
+                            },
+                            {
+                              "key": "unit",
+                              "label": "Unit"
+                            },
+                            {
+                              "key": "detail",
+                              "label": "What happened"
+                            }
+                          ],
+                          "rowKey": "key",
+                          "sortDefault": {
+                            "key": "t",
+                            "dir": "desc"
+                          },
+                          "filterKeys": [
+                            "ip",
+                            "label",
+                            "kind",
+                            "template",
+                            "unit",
+                            "detail"
+                          ],
+                          "groupModes": [
+                            {
+                              "id": "kind",
+                              "label": "By kind",
+                              "key": "kind"
+                            },
+                            {
+                              "id": "machine",
+                              "label": "By machine",
+                              "key": "ip"
+                            }
+                          ],
+                          "emptyText": "Nothing recorded in the last week. That is the good outcome."
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Last 30 days",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "reportIncidents",
+                            "args": [
+                              30
+                            ]
+                          },
+                          "columns": [
+                            {
+                              "key": "t",
+                              "label": "When",
+                              "format": "datetime"
+                            },
+                            {
+                              "key": "ip",
+                              "label": "Machine"
+                            },
+                            {
+                              "key": "kindBadges",
+                              "label": "Kind",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "detail",
+                              "label": "What happened"
+                            }
+                          ],
+                          "rowKey": "key",
+                          "sortDefault": {
+                            "key": "t",
+                            "dir": "desc"
+                          },
+                          "emptyText": "Nothing in the last month."
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

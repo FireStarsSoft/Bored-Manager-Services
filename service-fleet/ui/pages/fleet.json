@@ -1,0 +1,815 @@
+{
+  "blocks": [
+    {
+      "type": "conditional",
+      "when": {
+        "source": {
+          "kind": "stream",
+          "event": "capabilities",
+          "path": "connected"
+        },
+        "op": "eq",
+        "value": false
+      },
+      "blocks": [
+        {
+          "type": "section",
+          "title": "Not connected to a machine",
+          "blocks": [
+            {
+              "type": "note",
+              "title": "This module works through a machine you are connected to",
+              "lines": [
+                "It reaches the rest of your network from there: SSH to find machines and install the agent, then HTTP to everything the agent runs.",
+                "Connect to a machine on the same network as the fleet - the machine list is in the sidebar - and this page fills in by itself."
+              ],
+              "tone": "info"
+            }
+          ]
+        }
+      ],
+      "else": [
+        {
+          "type": "conditional",
+          "when": {
+            "source": {
+              "kind": "stream",
+              "event": "capabilities",
+              "path": "problem"
+            },
+            "op": "exists"
+          },
+          "blocks": [
+            {
+              "type": "section",
+              "title": "This machine cannot reach the fleet",
+              "blocks": [
+                {
+                  "type": "keyValue",
+                  "source": {
+                    "kind": "stream",
+                    "event": "capabilities"
+                  },
+                  "rows": [
+                    {
+                      "key": "sshVersion",
+                      "label": "SSH client"
+                    },
+                    {
+                      "key": "problem",
+                      "label": "Problem"
+                    }
+                  ]
+                },
+                {
+                  "type": "note",
+                  "title": "What to do",
+                  "lines": [
+                    "Something the module cannot work without is missing on the machine you are connected to, so nothing has been read and no figure below would be real.",
+                    "Module settings lists every tool it looks for. Install the missing ones there, or connect to a machine that already has them."
+                  ],
+                  "tone": "warning"
+                },
+                {
+                  "type": "actions",
+                  "actions": [
+                    {
+                      "label": "Check again",
+                      "method": "sweepNow"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "else": [
+            {
+              "type": "conditional",
+              "when": {
+                "source": {
+                  "kind": "stream",
+                  "event": "capabilities",
+                  "path": "warning"
+                },
+                "op": "exists"
+              },
+              "blocks": [
+                {
+                  "type": "note",
+                  "title": "Working, with something worth knowing",
+                  "lines": [
+                    "The fleet is being read, and one thing about the machine you are connected to makes it slower or less precise than it could be. Module settings names it."
+                  ],
+                  "tone": "warning"
+                }
+              ]
+            },
+            {
+              "type": "subnav",
+              "items": [
+                {
+                  "id": "overview",
+                  "label": "Overview",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What this page is",
+                          "lines": [
+                            "One row per machine the module has found, with what its agent reports it is running.",
+                            "Colour is worst-first: red means something is failing or a machine has no internet, amber means an agent is missing, out of date, or a service is degraded, green means everything a machine was asked to run is running."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Fleet",
+                      "columns": 4,
+                      "slowTarget": "service-fleet",
+                      "slowAt": {
+                        "kind": "stream",
+                        "event": "sweep",
+                        "path": "t"
+                      },
+                      "blocks": [
+                        {
+                          "type": "stat",
+                          "label": "Agents ready",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.ready"
+                          },
+                          "format": "number",
+                          "spark": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "series"
+                            },
+                            "key": "ready"
+                          }
+                        },
+                        {
+                          "type": "stat",
+                          "label": "No agent",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.noAgent"
+                          },
+                          "format": "number",
+                          "spark": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "series"
+                            },
+                            "key": "noAgent"
+                          }
+                        },
+                        {
+                          "type": "stat",
+                          "label": "Unreachable",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.unreachable"
+                          },
+                          "format": "number",
+                          "spark": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "series"
+                            },
+                            "key": "unreachable"
+                          }
+                        },
+                        {
+                          "type": "stat",
+                          "label": "Machines offline",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.hostsOffline"
+                          },
+                          "format": "number"
+                        },
+                        {
+                          "type": "stat",
+                          "label": "Services running",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.instancesRunning"
+                          },
+                          "format": "number",
+                          "spark": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "series"
+                            },
+                            "key": "running"
+                          }
+                        },
+                        {
+                          "type": "stat",
+                          "label": "Degraded",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.instancesDegraded"
+                          },
+                          "format": "number"
+                        },
+                        {
+                          "type": "stat",
+                          "label": "Failed",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.instancesFailed"
+                          },
+                          "format": "number",
+                          "spark": {
+                            "source": {
+                              "kind": "stream",
+                              "event": "series"
+                            },
+                            "key": "failed"
+                          }
+                        },
+                        {
+                          "type": "stat",
+                          "label": "Machines",
+                          "source": {
+                            "kind": "stream",
+                            "event": "fleet",
+                            "path": "counts.total"
+                          },
+                          "format": "number"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Sweep",
+                      "blocks": [
+                        {
+                          "type": "keyValue",
+                          "source": {
+                            "kind": "stream",
+                            "event": "sweep"
+                          },
+                          "rows": [
+                            {
+                              "key": "state",
+                              "label": "State"
+                            },
+                            {
+                              "key": "message",
+                              "label": "Last result"
+                            },
+                            {
+                              "key": "done",
+                              "label": "Addresses done"
+                            },
+                            {
+                              "key": "total",
+                              "label": "Addresses planned"
+                            },
+                            {
+                              "key": "finishedAt",
+                              "label": "Finished",
+                              "format": "time"
+                            },
+                            {
+                              "key": "durationMs",
+                              "label": "Took",
+                              "format": "duration"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "actions",
+                          "actions": [
+                            {
+                              "label": "Sweep now",
+                              "method": "sweepNow"
+                            },
+                            {
+                              "label": "Cancel sweep",
+                              "method": "sweepCancel"
+                            },
+                            {
+                              "label": "Collect telemetry now",
+                              "method": "collectNow"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "wall",
+                  "label": "Status wall",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "Reading the wall",
+                          "lines": [
+                            "One card per machine. The chips are what its agent is running, and a chip is pinned when it is not healthy - so \"Only what is not ok\" leaves just the things worth looking at.",
+                            "Click a card to see everything the machine reported, act on one service, or open a shell."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "statusCards",
+                      "source": {
+                        "kind": "stream",
+                        "event": "fleet",
+                        "path": "hosts"
+                      },
+                      "rowKey": "id",
+                      "titleKey": "ip",
+                      "statusKey": "status",
+                      "subtitleKey": "summary",
+                      "note": {
+                        "key": "note",
+                        "label": "Detail",
+                        "startOpen": false
+                      },
+                      "items": {
+                        "key": "services",
+                        "labelKey": "label",
+                        "statusKey": "status",
+                        "pinnedKey": "pinned",
+                        "visibleRows": 2,
+                        "pinnedFilterLabel": "Only what is not ok",
+                        "emptyText": "nothing deployed"
+                      },
+                      "columns": {
+                        "default": 3,
+                        "min": 1,
+                        "max": 6
+                      },
+                      "rowActions": [
+                        {
+                          "label": "Probe",
+                          "method": "hostProbe",
+                          "argsFromRow": [
+                            "ip"
+                          ]
+                        }
+                      ],
+                      "rowDetail": [
+                        {
+                          "type": "section",
+                          "title": "Machine",
+                          "blocks": [
+                            {
+                              "type": "keyValue",
+                              "source": {
+                                "kind": "invoke",
+                                "method": "hostInspect",
+                                "args": [
+                                  "$row.ip"
+                                ]
+                              },
+                              "rows": [
+                                {
+                                  "key": "hostname",
+                                  "label": "Hostname"
+                                },
+                                {
+                                  "key": "agentBadges",
+                                  "label": "Agent",
+                                  "format": "badges"
+                                },
+                                {
+                                  "key": "agentVersion",
+                                  "label": "Agent version"
+                                },
+                                {
+                                  "key": "agentMessage",
+                                  "label": "Agent says"
+                                },
+                                {
+                                  "key": "reachBadges",
+                                  "label": "SSH",
+                                  "format": "badges"
+                                },
+                                {
+                                  "key": "note",
+                                  "label": "Note"
+                                },
+                                {
+                                  "key": "publicIp",
+                                  "label": "Public address"
+                                },
+                                {
+                                  "key": "latencyMs",
+                                  "label": "Latency (ms)"
+                                },
+                                {
+                                  "key": "pingTarget",
+                                  "label": "Last ping target"
+                                },
+                                {
+                                  "key": "ipSource",
+                                  "label": "Address source"
+                                },
+                                {
+                                  "key": "lastSeen",
+                                  "label": "Last reached",
+                                  "format": "time"
+                                },
+                                {
+                                  "key": "firstSeen",
+                                  "label": "First seen",
+                                  "format": "time"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "What it is running",
+                          "blocks": [
+                            {
+                              "type": "table",
+                              "source": {
+                                "kind": "invoke",
+                                "method": "hostInstances",
+                                "args": [
+                                  "$row.ip"
+                                ]
+                              },
+                              "columns": [
+                                {
+                                  "key": "displayName",
+                                  "label": "Service"
+                                },
+                                {
+                                  "key": "stateBadges",
+                                  "label": "State",
+                                  "format": "badges",
+                                  "sortable": false
+                                },
+                                {
+                                  "key": "units",
+                                  "label": "Units"
+                                }
+                              ],
+                              "rowKey": "key",
+                              "rowActions": [
+                                {
+                                  "label": "Restart",
+                                  "method": "instanceAction",
+                                  "argsFromRow": [
+                                    "key"
+                                  ],
+                                  "args": [
+                                    "restart"
+                                  ]
+                                },
+                                {
+                                  "label": "Stop",
+                                  "method": "instanceAction",
+                                  "argsFromRow": [
+                                    "key"
+                                  ],
+                                  "args": [
+                                    "stop"
+                                  ],
+                                  "confirm": "Stop this service? It stops earning until it is started again.",
+                                  "kind": "danger"
+                                }
+                              ],
+                              "emptyText": "Nothing is deployed here yet. Use Services → Deploy to give it something."
+                            }
+                          ]
+                        },
+                        {
+                          "type": "section",
+                          "title": "Actions",
+                          "blocks": [
+                            {
+                              "type": "actions",
+                              "actions": [
+                                {
+                                  "label": "Probe now",
+                                  "method": "hostProbe",
+                                  "argsFromRow": [
+                                    "ip"
+                                  ]
+                                },
+                                {
+                                  "label": "Forget this machine",
+                                  "method": "hostForget",
+                                  "argsFromRow": [
+                                    "ip"
+                                  ],
+                                  "confirm": "Drop this machine from the roster? It comes back on the next sweep if an address rule still covers it.",
+                                  "kind": "danger"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "terminal",
+                              "label": "Open a shell on this machine",
+                              "commandTemplate": "ssh -p {{port}} {{username}}@{{ip}}"
+                            }
+                          ]
+                        }
+                      ],
+                      "emptyText": "No machines have answered yet. Add an address range in Module settings, then sweep."
+                    }
+                  ]
+                },
+                {
+                  "id": "network",
+                  "label": "Public addresses",
+                  "blocks": [
+                    {
+                      "type": "note",
+                      "title": "Why this page exists",
+                      "lines": [
+                        "Most bandwidth-sharing services forbid several devices behind one connection, and will suspend an account that does it.",
+                        "Every agent reports the public address it sees itself as. Machines sharing one address are grouped here, and the Shared column counts how many templates two of them are running that are the same."
+                      ],
+                      "tone": "info"
+                    },
+                    {
+                      "type": "section",
+                      "title": "Public addresses",
+                      "blocks": [
+                        {
+                          "type": "table",
+                          "source": {
+                            "kind": "invoke",
+                            "method": "netRows",
+                            "intervalKey": "service-fleet"
+                          },
+                          "columns": [
+                            {
+                              "key": "publicIp",
+                              "label": "Public address"
+                            },
+                            {
+                              "key": "ip",
+                              "label": "Machine"
+                            },
+                            {
+                              "key": "label",
+                              "label": "Label"
+                            },
+                            {
+                              "key": "onlineBadges",
+                              "label": "Internet",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "latencyMs",
+                              "label": "Latency (ms)",
+                              "align": "right"
+                            },
+                            {
+                              "key": "source",
+                              "label": "Reported by"
+                            },
+                            {
+                              "key": "sharesIp",
+                              "label": "Machines on it",
+                              "align": "right"
+                            },
+                            {
+                              "key": "clashBadges",
+                              "label": "Shared",
+                              "format": "badges",
+                              "sortable": false
+                            },
+                            {
+                              "key": "clashes",
+                              "label": "Same service as"
+                            }
+                          ],
+                          "rowKey": "ip",
+                          "sortDefault": {
+                            "key": "publicIp",
+                            "dir": "asc"
+                          },
+                          "groupModes": [
+                            {
+                              "id": "public",
+                              "label": "By public address",
+                              "key": "publicIp"
+                            }
+                          ],
+                          "filterKeys": [
+                            "ip",
+                            "label",
+                            "publicIp",
+                            "clashes"
+                          ],
+                          "emptyText": "No agent has reported a public address yet. They measure one every few seconds once installed."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "history",
+                  "label": "History",
+                  "blocks": [
+                    {
+                      "type": "conditional",
+                      "when": {
+                        "source": {
+                          "kind": "stream",
+                          "event": "ui",
+                          "path": "hintsOn"
+                        },
+                        "op": "eq",
+                        "value": true
+                      },
+                      "blocks": [
+                        {
+                          "type": "note",
+                          "title": "What is charted",
+                          "lines": [
+                            "The last few minutes, from the sweeps this app has run. Anything longer lives on Reports, which reads what the agents themselves kept."
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Fleet health",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "chart",
+                          "title": "Agents",
+                          "kind": "line",
+                          "source": {
+                            "kind": "history",
+                            "stream": "service-fleet",
+                            "keys": [
+                              "ready",
+                              "noAgent",
+                              "unreachable"
+                            ],
+                            "liveEvent": "series"
+                          },
+                          "series": [
+                            {
+                              "key": "ready",
+                              "label": "Agent ready",
+                              "color": "success"
+                            },
+                            {
+                              "key": "noAgent",
+                              "label": "No agent",
+                              "color": "warning"
+                            },
+                            {
+                              "key": "unreachable",
+                              "label": "Unreachable",
+                              "color": "destructive"
+                            }
+                          ],
+                          "window": 3600
+                        },
+                        {
+                          "type": "chart",
+                          "title": "Services",
+                          "kind": "line",
+                          "source": {
+                            "kind": "history",
+                            "stream": "service-fleet",
+                            "keys": [
+                              "running",
+                              "degraded",
+                              "failed"
+                            ],
+                            "liveEvent": "series"
+                          },
+                          "series": [
+                            {
+                              "key": "running",
+                              "label": "Running",
+                              "color": "success"
+                            },
+                            {
+                              "key": "degraded",
+                              "label": "Degraded",
+                              "color": "warning"
+                            },
+                            {
+                              "key": "failed",
+                              "label": "Failed",
+                              "color": "destructive"
+                            }
+                          ],
+                          "window": 3600
+                        }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "title": "Last six hours",
+                      "columns": 2,
+                      "blocks": [
+                        {
+                          "type": "chart",
+                          "title": "Agents",
+                          "kind": "line",
+                          "source": {
+                            "kind": "history",
+                            "stream": "service-fleet",
+                            "keys": [
+                              "ready",
+                              "noAgent",
+                              "unreachable"
+                            ],
+                            "liveEvent": "series"
+                          },
+                          "series": [
+                            {
+                              "key": "ready",
+                              "label": "Agent ready",
+                              "color": "success"
+                            },
+                            {
+                              "key": "noAgent",
+                              "label": "No agent",
+                              "color": "warning"
+                            },
+                            {
+                              "key": "unreachable",
+                              "label": "Unreachable",
+                              "color": "destructive"
+                            }
+                          ],
+                          "window": 21600
+                        },
+                        {
+                          "type": "chart",
+                          "title": "Machines with no internet",
+                          "kind": "area",
+                          "source": {
+                            "kind": "history",
+                            "stream": "service-fleet",
+                            "keys": [
+                              "offline"
+                            ],
+                            "liveEvent": "series"
+                          },
+                          "series": [
+                            {
+                              "key": "offline",
+                              "label": "Offline",
+                              "color": "destructive"
+                            }
+                          ],
+                          "window": 21600
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
